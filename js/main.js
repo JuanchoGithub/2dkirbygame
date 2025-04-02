@@ -328,6 +328,8 @@ function createWaddleDee() {
     return waddleDeeGroup;
 }
 
+
+
 // --- NEW: Create Sword Function ---
 function createSword() {
     const swordGroup = new THREE.Group();
@@ -391,12 +393,83 @@ function createSword() {
     return swordGroup;
 }
 
+// --- NEW: Create Rabbit Helmet Function ---
+function createRabbitHelmet() {
+    const helmetGroup = new THREE.Group();
+
+    const helmetMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFFFFFF, // White
+        roughness: 0.8,
+        metalness: 0.1
+    });
+    const innerEarMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFFC0CB, // Pink
+        roughness: 0.9,
+        metalness: 0.0,
+        side: THREE.DoubleSide // Good for flat shapes
+    });
+
+    // Dimensions
+    const baseRadius = 0.7;
+    const baseHeight = 0.6;
+    const earLength = 1.5;
+    const earWidth = 0.25;
+    const earThickness = 0.1;
+
+    // Helmet Base (Short Cylinder or Cut Sphere)
+    // Using Cylinder: CylinderGeometry(radiusTop, radiusBottom, height, radialSegments, heightSegments, openEnded)
+    const baseGeom = new THREE.CylinderGeometry(baseRadius * 0.9, baseRadius, baseHeight, 16, 1, true); // Open ended bottom
+    const baseMesh = new THREE.Mesh(baseGeom, helmetMaterial);
+    baseMesh.position.y = baseHeight / 2; // Position base at origin
+    baseMesh.castShadow = true;
+    helmetGroup.add(baseMesh);
+
+    // Ears (Flattened Boxes or Cylinders) - Using Boxes
+    const earGeom = new THREE.BoxGeometry(earWidth, earLength, earThickness);
+
+    // Left Ear
+    const leftEarMesh = new THREE.Mesh(earGeom, helmetMaterial);
+    leftEarMesh.position.set(-baseRadius * 0.4, baseHeight + earLength * 0.4, 0); // Position on top-left of base
+    leftEarMesh.rotation.z = Math.PI / 12; // Slight outward tilt
+    leftEarMesh.castShadow = true;
+    helmetGroup.add(leftEarMesh);
+
+    // Right Ear
+    const rightEarMesh = new THREE.Mesh(earGeom, helmetMaterial);
+    rightEarMesh.position.set(baseRadius * 0.4, baseHeight + earLength * 0.4, 0); // Position on top-right of base
+    rightEarMesh.rotation.z = -Math.PI / 12; // Slight outward tilt
+    rightEarMesh.castShadow = true;
+    helmetGroup.add(rightEarMesh);
+
+    // Optional: Inner Ear Detail (Flattened shapes inside ears)
+    const innerEarGeom = new THREE.PlaneGeometry(earWidth * 0.6, earLength * 0.7); // Smaller plane
+    const leftInnerEarMesh = new THREE.Mesh(innerEarGeom, innerEarMaterial);
+    // Position slightly in front of the main ear mesh along its local Z
+    leftInnerEarMesh.position.z = earThickness / 2 + 0.01;
+    leftEarMesh.add(leftInnerEarMesh); // Add as child of the ear
+
+    const rightInnerEarMesh = new THREE.Mesh(innerEarGeom, innerEarMaterial);
+    rightInnerEarMesh.position.z = earThickness / 2 + 0.01;
+    rightEarMesh.add(rightInnerEarMesh); // Add as child of the ear
+
+    // Group origin is at the base center of the helmet
+
+    return helmetGroup;
+}
+
 // --- NEW: Sword State Variables ---
 let swordGroup = null; // Holds the THREE.Group for the sword object
 let swordBox = null;   // Holds the THREE.Box3 for collision on the ground
 let isSwordOnGround = false; // Is the sword currently in the scene?
 let isKirbyHoldingSword = false; // Does Kirby have the sword?
 const swordBoundingBoxSize = { x: 0.6, y: 2.5, z: 0.6 }; // Approx. collision size of sword on ground
+
+// --- NEW: Rabbit Helmet State Variables ---
+let rabbitHelmetGroup = null;
+let rabbitHelmetBox = null;
+let isHelmetOnGround = false;
+let isKirbyWearingHelmet = false;
+const helmetBoundingBoxSize = { x: 1.5, y: 2.0, z: 1.0 }; // Approx collision size (base + ears)
 
 // --- NEW: Spawn Sword Function ---
 function spawnSword() {
@@ -450,6 +523,60 @@ function spawnSword() {
     // swordGroup.userData.helper = helper; // Store helper reference if needed
 }
 
+// --- NEW: Spawn Rabbit Helmet Function ---
+function spawnRabbitHelmet() {
+    // Only spawn if there isn't one on the ground and Kirby isn't wearing it
+    if (isHelmetOnGround || isKirbyWearingHelmet || rabbitHelmetGroup) return;
+
+    rabbitHelmetGroup = createRabbitHelmet();
+
+    // --- Determine Spawn Position (avoiding center, edges, maybe sword too) ---
+    let spawnX, spawnZ, tooCloseToSword;
+    const minSpawnDist = 4; // Minimum distance from center (0,0)
+    const maxSpawnDist = placementAreaSize / 2 - 3; // Keep away from edges
+    const minDistBetweenItems = 5; // Min distance between helmet and sword spawn
+
+    do {
+        spawnX = (Math.random() - 0.5) * placementAreaSize;
+        spawnZ = (Math.random() - 0.5) * placementAreaSize;
+        tooCloseToSword = false;
+        if (isSwordOnGround && swordGroup) {
+            const distSq = (spawnX - swordGroup.position.x)**2 + (spawnZ - swordGroup.position.z)**2;
+            tooCloseToSword = distSq < minDistBetweenItems**2;
+        }
+    } while (Math.sqrt(spawnX*spawnX + spawnZ*spawnZ) < minSpawnDist ||
+             Math.abs(spawnX) > maxSpawnDist || Math.abs(spawnZ) > maxSpawnDist ||
+             tooCloseToSword);
+
+    // Position slightly above ground
+    const helmetGroundLevel = groundMesh.position.y + 0.1;
+    rabbitHelmetGroup.position.set(spawnX, helmetGroundLevel, spawnZ);
+    // rabbitHelmetGroup.rotation.y = Math.random() * Math.PI * 2; // Random facing
+
+    // --- Calculate and Store World Bounding Box ---
+    rabbitHelmetBox = new THREE.Box3();
+    const min = new THREE.Vector3(
+        -helmetBoundingBoxSize.x / 2,
+        0, // Base near ground level
+        -helmetBoundingBoxSize.z / 2
+    );
+    const max = new THREE.Vector3(
+        helmetBoundingBoxSize.x / 2,
+        helmetBoundingBoxSize.y, // Height including ears
+        helmetBoundingBoxSize.z / 2
+    );
+    min.add(rabbitHelmetGroup.position);
+    max.add(rabbitHelmetGroup.position);
+    rabbitHelmetBox.set(min, max);
+
+    scene.add(rabbitHelmetGroup);
+    isHelmetOnGround = true;
+
+    // Optional: Visualize Bounding Box
+    // const helper = new THREE.Box3Helper(rabbitHelmetBox, 0x00ffff); // Cyan box
+    // scene.add(helper);
+    // rabbitHelmetGroup.userData.helper = helper;
+}
 
 function spawnWaddleDee() {
     if (activeWaddleDees.length >= MAX_WADDLE_DEES) {
@@ -622,6 +749,7 @@ for (let i = 0; i < numTrees; i++) {
 
 // --- Spawn Initial Objects ---
 spawnSword(); // Spawn the sword initially
+spawnRabbitHelmet(); // Spawn the helmet initially // <<< ADD THIS LINE
 for (let i = 0; i < MAX_WADDLE_DEES; i++) { // Spawn initial Waddle Dees
     spawnWaddleDee();
 }
@@ -735,6 +863,30 @@ function animate() {
         }
     }
 
+    // --- NEW: Rabbit Helmet Pickup Check ---
+    if (isHelmetOnGround && !isKirbyWearingHelmet && rabbitHelmetGroup && rabbitHelmetBox) {
+        if (currentKirbyBox.intersectsBox(rabbitHelmetBox)) {
+            console.log("Kirby put on the rabbit helmet!");
+            isHelmetOnGround = false;
+            isKirbyWearingHelmet = true;
+
+            // Remove helmet from scene's top level
+            scene.remove(rabbitHelmetGroup);
+            // Optional: remove helper
+            // if (rabbitHelmetGroup.userData.helper) scene.remove(rabbitHelmetGroup.userData.helper);
+
+            // Attach helmet to Kirby
+            kirbyGroup.add(rabbitHelmetGroup);
+
+            // --- Position and Rotate Helmet Relative to Kirby ---
+            // Tweak these values to place it correctly on Kirby's "head"
+            // Y position should be roughly Kirby's body radius + helmet base height/2
+            const kirbyHeadY = 1.0; // Kirby's body radius, approx head height
+            rabbitHelmetGroup.position.set(0, kirbyHeadY + 0.1, 0.1); // Centered X, above body, slightly forward Z
+            rabbitHelmetGroup.rotation.set(0, 0, 0); // No rotation relative to Kirby initially
+            rabbitHelmetGroup.scale.set(1, 1, 1); // Keep original scale for now
+        }
+    }
 
     // --- Horizontal Movement ---
     const moveSpeed = 5 * deltaTime;
@@ -846,7 +998,7 @@ function animate() {
         targetRotationZ = Math.sin(elapsedTime * walkCycleSpeed) * walkCycleAmplitude;
     }
     // If holding sword, reduce or disable waddle? Optional tweak.
-    let currentWaddleLerp = isKirbyHoldingSword ? 0.05 : 0.1; // Slower lerp if holding sword?
+    let currentWaddleLerp = (isKirbyHoldingSword || isKirbyWearingHelmet) ? 0.03 : 0.1; // Slower/less waddle with items
     kirbyGroup.rotation.z = THREE.MathUtils.lerp(kirbyGroup.rotation.z, targetRotationZ, currentWaddleLerp);
 
 
@@ -925,4 +1077,4 @@ function animate() {
 
 animate(); // Start the loop
 
-console.log("Three.js Kirby setup complete! Added Sword.");
+console.log("Three.js Kirby setup complete! Added Sword and Rabbit Helmet.");
