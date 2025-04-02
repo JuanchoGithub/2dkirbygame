@@ -593,7 +593,7 @@ const MAX_WADDLE_DEES = 4;
 const WADDLE_DEE_SPEED = 2.0;
 const WADDLE_DEE_TURN_SPEED = 0.08;
 const activeWaddleDees = [];
-const WADDLE_DEE_GROUND_LEVEL = 0.8 - 0.5; // Centered body radius - ground offset
+const WADDLE_DEE_GROUND_LEVEL = - 0.5; // Centered body radius - ground offset
 const SPAWN_MARGIN = 5;
 const despawnBoundary = placementAreaSize / 2 + SPAWN_MARGIN;
 const spawnArea = placementAreaSize / 2 + SPAWN_MARGIN * 0.5;
@@ -1046,7 +1046,29 @@ function animate() {
         isGrounded = false;
     }
 
+    // --->>> NEW: KIRBY DEATH CHECK <<<---
+    // Check only if NOT sucking and NOT currently in the process of stomping (velocityY >= 0)
+    if (!isSucking && velocityY >= 0) {
+        getKirbyWorldBox(kirbyGroup.position); // Ensure Kirby's box is up-to-date *after* final position update
 
+        for (const wdData of activeWaddleDees) {
+            // Skip the check if this WD is the one being sucked (shouldn't happen if !isSucking, but safe)
+            if (suckedWaddleDeeData && wdData.group === suckedWaddleDeeData.group) {
+                continue;
+            }
+
+            // Check intersection
+            if (wdData && wdData.bbox && currentKirbyBox.intersectsBox(wdData.bbox)) {
+                // Collision detected under death conditions!
+                console.log("GAME OVER: Kirby touched a Waddle Dee!");
+                // Reload the page to restart the game
+                window.location.reload();
+                return; // Exit the animate function immediately after reload call
+            }
+        }
+    }
+    // --->>> END OF DEATH CHECK <<<---
+    
     // --- Walk Animation (Z Rotation Waddle) ---
     let targetRotationZ = 0;
     // Only waddle if moving, grounded, NOT sucking, AND not animating a WD suck-in
