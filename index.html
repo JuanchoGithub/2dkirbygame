@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kirby 3D - Three.js (No Server Needed)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- 1. Import the Three.js UMD build -->
+    <!-- This exposes a global 'THREE' variable -->
+    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+    <!-- Note: No 'type="importmap"' needed -->
+    <!-- Note: Using .min.js for a smaller file size -->
+
+    <!-- 2. Import our main game script AFTER Three.js -->
+    <!-- Note: This is now a regular script, NOT type="module" -->
+    <script src="js/main.js"></script>
+</body>
+</html>

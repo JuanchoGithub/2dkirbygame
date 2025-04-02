@@ -1,0 +1,12 @@
+/* Remove default browser margin/padding */
+body {
+    margin: 0;
+    overflow: hidden; /* Prevent scrollbars */
+}
+
+/* Make the canvas fill the screen */
+#gameCanvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+}
