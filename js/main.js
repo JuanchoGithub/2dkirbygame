@@ -328,6 +328,129 @@ function createWaddleDee() {
     return waddleDeeGroup;
 }
 
+// --- NEW: Create Sword Function ---
+function createSword() {
+    const swordGroup = new THREE.Group();
+
+    const bladeMaterial = new THREE.MeshStandardMaterial({
+        color: 0xC0C0C0, // Silver
+        metalness: 0.9,
+        roughness: 0.3
+    });
+    const hiltMaterial = new THREE.MeshStandardMaterial({
+        color: 0x8B4513, // Brown
+        metalness: 0.2,
+        roughness: 0.8
+    });
+    const pommelMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFFD700, // Gold
+        metalness: 0.8,
+        roughness: 0.4
+    });
+
+    // Dimensions
+    const bladeLength = 1.8;
+    const bladeRadius = 0.08;
+    const guardWidth = 0.5;
+    const guardThickness = 0.15;
+    const gripLength = 0.4;
+    const gripRadius = 0.09;
+    const pommelRadius = 0.15;
+
+    // Blade (Cylinder) - Tip at top
+    const bladeGeom = new THREE.CylinderGeometry(bladeRadius * 0.5, bladeRadius, bladeLength, 8);
+    const bladeMesh = new THREE.Mesh(bladeGeom, bladeMaterial);
+    bladeMesh.position.y = gripLength / 2 + bladeLength / 2; // Position above grip
+    bladeMesh.castShadow = true;
+    swordGroup.add(bladeMesh);
+
+    // Guard (Box) - Centered at top of grip
+    const guardGeom = new THREE.BoxGeometry(guardWidth, guardThickness, guardThickness * 1.2);
+    const guardMesh = new THREE.Mesh(guardGeom, hiltMaterial);
+    guardMesh.position.y = gripLength / 2 + guardThickness / 2; // Slightly overlap grip top
+    guardMesh.castShadow = true;
+    swordGroup.add(guardMesh);
+
+    // Grip (Cylinder) - Centered at origin
+    const gripGeom = new THREE.CylinderGeometry(gripRadius, gripRadius, gripLength, 8);
+    const gripMesh = new THREE.Mesh(gripGeom, hiltMaterial);
+    // gripMesh.position.y is 0 (centered)
+    gripMesh.castShadow = true;
+    swordGroup.add(gripMesh);
+
+    // Pommel (Sphere) - Below grip
+    const pommelGeom = new THREE.SphereGeometry(pommelRadius, 8, 6);
+    const pommelMesh = new THREE.Mesh(pommelGeom, pommelMaterial);
+    pommelMesh.position.y = -gripLength / 2 - pommelRadius * 0.5; // Below grip
+    pommelMesh.castShadow = true;
+    swordGroup.add(pommelMesh);
+
+    // Set group origin (conceptually) at the center of the grip
+    // We'll rotate the whole group when placing it on the ground or Kirby
+
+    return swordGroup;
+}
+
+// --- NEW: Sword State Variables ---
+let swordGroup = null; // Holds the THREE.Group for the sword object
+let swordBox = null;   // Holds the THREE.Box3 for collision on the ground
+let isSwordOnGround = false; // Is the sword currently in the scene?
+let isKirbyHoldingSword = false; // Does Kirby have the sword?
+const swordBoundingBoxSize = { x: 0.6, y: 2.5, z: 0.6 }; // Approx. collision size of sword on ground
+
+// --- NEW: Spawn Sword Function ---
+function spawnSword() {
+    // Only spawn if there isn't one already on the ground and Kirby isn't holding it
+    if (isSwordOnGround || isKirbyHoldingSword || swordGroup) return;
+
+    swordGroup = createSword();
+
+    // --- Determine Spawn Position ---
+    let spawnX, spawnZ;
+    const minSpawnDist = 3; // Don't spawn right on top of Kirby start
+    const maxSpawnDist = placementAreaSize / 2 - 2; // Keep away from edges
+
+    do {
+        spawnX = (Math.random() - 0.5) * placementAreaSize;
+        spawnZ = (Math.random() - 0.5) * placementAreaSize;
+    } while (Math.sqrt(spawnX*spawnX + spawnZ*spawnZ) < minSpawnDist ||
+             Math.abs(spawnX) > maxSpawnDist || Math.abs(spawnZ) > maxSpawnDist);
+
+    // Position slightly above ground, maybe tilted
+    const swordGroundLevel = groundMesh.position.y + 0.1; // Slightly elevated
+    swordGroup.position.set(spawnX, swordGroundLevel, spawnZ);
+    swordGroup.rotation.z = Math.PI / 6; // Tilt slightly
+    swordGroup.rotation.y = Math.random() * Math.PI * 2; // Random facing direction
+
+    // --- Calculate and Store World Bounding Box for Sword ---
+    swordBox = new THREE.Box3();
+    // Define box relative to sword's origin (center of grip), considering tilt later might be complex
+    // Using a simpler axis-aligned box around the position for now
+    const min = new THREE.Vector3(
+        -swordBoundingBoxSize.x / 2,
+        0, // Base near ground level
+        -swordBoundingBoxSize.z / 2
+    );
+    const max = new THREE.Vector3(
+        swordBoundingBoxSize.x / 2,
+        swordBoundingBoxSize.y, // Height of the sword
+        swordBoundingBoxSize.z / 2
+    );
+    // Since the sword is slightly tilted, this box is an approximation
+    min.add(swordGroup.position);
+    max.add(swordGroup.position);
+    swordBox.set(min, max);
+
+    scene.add(swordGroup);
+    isSwordOnGround = true;
+
+    // Optional: Visualize Bounding Box
+    // const helper = new THREE.Box3Helper(swordBox, 0xff00ff); // Magenta box
+    // scene.add(helper);
+    // swordGroup.userData.helper = helper; // Store helper reference if needed
+}
+
+
 function spawnWaddleDee() {
     if (activeWaddleDees.length >= MAX_WADDLE_DEES) {
         return;
@@ -387,6 +510,7 @@ function spawnWaddleDee() {
     // --- Optional: Visualize Waddle Dee Bounding Box (debugging) ---
     // const helper = new THREE.Box3Helper(waddleDeeBox, 0x00ff00); // Green box
     // scene.add(helper);
+    // waddleDeeGroup.userData.helper = helper; // Store helper if needed
     // ---
 }
 
@@ -414,11 +538,11 @@ const treeBoundingBoxes = []; // Array to hold THREE.Box3 objects for trees
 const treeData = [];          // Optional: Store tree group along with its bbox
 
 // --- Position the Kirby Group ---
-kirbyGroup.position.set(0, 1.0 - 0.5, 0); // Body radius - ground offset = 0.5
+// kirbyGroup.position.set(0, 1.0 - 0.5, 0); // Body radius - ground offset = 0.5 <-- redundant calc
 const kirbyGroundLevel = 1.0 - 0.5; // Body radius - ground offset
 kirbyGroup.position.set(0, kirbyGroundLevel, 0);
 scene.add(kirbyGroup); // Add the entire group to the scene
-const physicsGroundLevel = kirbyGroundLevel; // Kirby lands at his 
+const physicsGroundLevel = kirbyGroundLevel; // Kirby lands at his base height
 
 // --- Add Trees ---
 const numTrees = 25; // How many trees to create
@@ -434,13 +558,15 @@ const treeCollisionBoxOffset = { x: 0, y: treeCollisionBoxSize.y / 2, z: 0 }; //
 const MAX_WADDLE_DEES = 4;
 const WADDLE_DEE_SPEED = 2.0; // Units per second
 const WADDLE_DEE_TURN_SPEED = 0.08; // Similar to Kirby's turn speed factor
-const activeWaddleDees = []; // Array to hold { group, velocity, changeDirTimer }
-const WADDLE_DEE_GROUND_LEVEL = -0.5; // Waddle Dee base Y position (adjust if needed based on model)
+const activeWaddleDees = []; // Array to hold { group, velocity, changeDirTimer, bbox }
+const WADDLE_DEE_GROUND_LEVEL = 0.8 - 0.5; // Waddle Dee body radius - ground offset
 const SPAWN_MARGIN = 5; // How far outside the main area to spawn/despawn
 const despawnBoundary = placementAreaSize / 2 + SPAWN_MARGIN; // Max distance from center
 const spawnArea = placementAreaSize / 2 + SPAWN_MARGIN * 0.5; // Spawn slightly inside despawn boundary
 const MIN_DIR_CHANGE_TIME = 3.0; // Minimum seconds before changing direction
 const MAX_DIR_CHANGE_TIME = 8.0; // Maximum seconds
+const minSpawnDist = 3; // Don't spawn right on top of Kirby start
+
 
 for (let i = 0; i < numTrees; i++) {
     const tree = createTree(); // Tree group origin is at the base center
@@ -451,7 +577,9 @@ for (let i = 0; i < numTrees; i++) {
         x = (Math.random() - 0.5) * placementAreaSize;
         z = (Math.random() - 0.5) * placementAreaSize;
         const distanceSq = x*x + z*z;
-        positionValid = (distanceSq > minimumDistanceToCenter * minimumDistanceToCenter);
+        // Ensure not too close to center AND not too close to where sword might spawn
+        positionValid = (distanceSq > minimumDistanceToCenter * minimumDistanceToCenter) &&
+                        (distanceSq > (minSpawnDist + 1) * (minSpawnDist + 1)); // Avoid sword spawn area slightly
     } while (!positionValid);
 
     tree.position.set(x, groundMesh.position.y, z);
@@ -492,8 +620,14 @@ for (let i = 0; i < numTrees; i++) {
     // ---
 }
 
+// --- Spawn Initial Objects ---
+spawnSword(); // Spawn the sword initially
+for (let i = 0; i < MAX_WADDLE_DEES; i++) { // Spawn initial Waddle Dees
+    spawnWaddleDee();
+}
 
-// 6. Keyboard Input State & Handling <--- Changed Section Title slightly
+
+// 6. Keyboard Input State & Handling
 // ====================================================================
 const keys = {
     w: false, a: false, s: false, d: false,
@@ -528,27 +662,31 @@ document.addEventListener('keyup', (event) => {
 const clock = new THREE.Clock();
 
 // --- Collision Check Helper Function ---
-function checkCollision(kirbyPotentialBox, collisionType = 'tree') { // Added collisionType parameter
+function checkCollision(kirbyPotentialBox, collisionType = 'tree') {
     if (collisionType === 'tree') {
         for (const treeBox of treeBoundingBoxes) {
             if (kirbyPotentialBox.intersectsBox(treeBox)) {
                 return true; // Collision with tree detected
             }
         }
-    } else if (collisionType === 'waddledee') { // New check for Waddle Dees
+    } else if (collisionType === 'waddledee') {
         for (const wdData of activeWaddleDees) {
-            if (kirbyPotentialBox.intersectsBox(wdData.bbox)) {
+             // Make sure wdData and its bbox exist before checking intersection
+            if (wdData && wdData.bbox && kirbyPotentialBox.intersectsBox(wdData.bbox)) {
                 return true; // Collision with Waddle Dee detected
             }
         }
     }
+    // Removed sword check from here, handle separately as item pickup
     return false; // No collision of the specified type
 }
 
 // --- Kirby BBox Helper ---
+const kirbyBodyCenterOffset = new THREE.Vector3(0, 1.0, 0); // Approx center of Kirby's sphere relative to group origin
 const kirbyRelativeBox = new THREE.Box3(
-    new THREE.Vector3(-kirbyBoundingBoxSize.x / 2, -kirbyBoundingBoxSize.y / 2, -kirbyBoundingBoxSize.z / 2),
-    new THREE.Vector3(kirbyBoundingBoxSize.x / 2, kirbyBoundingBoxSize.y / 2, kirbyBoundingBoxSize.z / 2)
+    // Adjust relative box to be centered around Kirby's visual center
+    new THREE.Vector3(-kirbyBoundingBoxSize.x / 2, -kirbyBoundingBoxSize.y / 2 + kirbyBodyCenterOffset.y, -kirbyBoundingBoxSize.z / 2),
+    new THREE.Vector3(kirbyBoundingBoxSize.x / 2, kirbyBoundingBoxSize.y / 2 + kirbyBodyCenterOffset.y, kirbyBoundingBoxSize.z / 2)
 );
 const currentKirbyBox = new THREE.Box3(); // Reusable Box3 for Kirby
 
@@ -558,13 +696,45 @@ function getKirbyWorldBox(position) {
     return currentKirbyBox;
 }
 // --- Optional: BBox Helper for Kirby (Debugging) ---
-// let kirbyBoxHelper = null;
+// let kirbyBoxHelper = new THREE.Box3Helper(currentKirbyBox, 0xff0000); // Red box
+// scene.add(kirbyBoxHelper); // Add helper to scene
 // ---
 
 function animate() {
     requestAnimationFrame(animate);
     const deltaTime = clock.getDelta();
     const elapsedTime = clock.getElapsedTime();
+
+    // --- Update Kirby's World BBox ---
+    getKirbyWorldBox(kirbyGroup.position); // Update currentKirbyBox position
+    // --- Optional: Update Kirby Helper ---
+    // if (kirbyBoxHelper) kirbyBoxHelper.box = currentKirbyBox;
+    // ---
+
+    // --- Sword Pickup Check ---
+    if (isSwordOnGround && !isKirbyHoldingSword && swordGroup && swordBox) {
+        if (currentKirbyBox.intersectsBox(swordBox)) {
+            console.log("Kirby picked up the sword!");
+            isSwordOnGround = false;
+            isKirbyHoldingSword = true;
+
+            // Remove sword from scene's top level
+            scene.remove(swordGroup);
+            // Optional: remove helper too
+            // if (swordGroup.userData.helper) scene.remove(swordGroup.userData.helper);
+
+
+            // Attach sword to Kirby
+            kirbyGroup.add(swordGroup);
+
+            // --- Position and Rotate Sword Relative to Kirby ---
+            // This requires tweaking based on Kirby's model and desired look
+            swordGroup.position.set(0.8, 0.3, 0.5); // Position near right hand (adjust X, Y, Z)
+            swordGroup.rotation.set(0, Math.PI / 4, -Math.PI / 2.5); // Point forward-ish and slightly up (adjust X, Y, Z angles)
+            swordGroup.scale.set(0.7, 0.7, 0.7); // Optionally make it slightly smaller when held
+        }
+    }
+
 
     // --- Horizontal Movement ---
     const moveSpeed = 5 * deltaTime;
@@ -597,7 +767,7 @@ function animate() {
         let kirbyPotentialBoxZ = getKirbyWorldBox(potentialPosZ);
         let collisionZ_tree = checkCollision(kirbyPotentialBoxZ, 'tree'); // Tree collision check
         let collisionZ_wd = checkCollision(kirbyPotentialBoxZ, 'waddledee'); // Waddle Dee collision check
-        console.log(collisionZ_wd);
+        // console.log("Checking Z collision WD:", collisionZ_wd); // DEBUG
         let collisionZ = collisionZ_tree || collisionZ_wd; // Combine tree and WD collisions for Z
 
         // --- Apply Movement Based on Collision ---
@@ -619,38 +789,41 @@ function animate() {
 
     } // End of horizontal movement + collision logic
 
-    // (Remains the same, no vertical collision check yet)
-    // --- Waddle Dee Death Check ---
-    if (!isGrounded) { // ONLY check for WD death when Kirby is jumping
-        const currentPos = kirbyGroup.position;
-        const moveDelta = moveDirection.clone().multiplyScalar(moveSpeed);
-        let potentialPosZ = currentPos.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
-        let kirbyPotentialBoxZ = getKirbyWorldBox(potentialPosZ);
-        let collisionZ_tree = checkCollision(kirbyPotentialBoxZ, 'tree'); // Tree collision check
-        let collisionZ_wd = checkCollision(kirbyPotentialBoxZ, 'waddledee'); // Waddle Dee collision check
-        let collisionZ = collisionZ_tree || collisionZ_wd; // Combine tree and WD collisions for Z
-        velocityY += gravity * deltaTime;
-        let currentKirbyWorldBox = getKirbyWorldBox(kirbyGroup.position);
+
+    // --- Vertical Movement (Physics) ---
+    if (!isGrounded) {
+        velocityY += gravity * deltaTime; // Apply gravity
+
+        // --- Waddle Dee Death Check ---
+        // Check collision using Kirby's *current* updated bounding box
+        getKirbyWorldBox(kirbyGroup.position); // Make sure box is current
+
         for (let i = activeWaddleDees.length - 1; i >= 0; i--) {
             const wdData = activeWaddleDees[i];
-            console.log(collisionZ_wd);
-            if (currentKirbyWorldBox.intersectsBox(wdData.bbox)) {
-                // Remove from scene
-                scene.remove(wdData.group);
-                console.log("Waddle Dee Killed!");
+             // Check intersection only if WD data and bbox are valid
+            if (wdData && wdData.bbox && currentKirbyBox.intersectsBox(wdData.bbox)) {
+                // Remove Waddle Dee if hit from above (basic check: Kirby moving down)
+                if (velocityY < 0) { // Check if Kirby is descending
+                    // Remove from scene
+                    scene.remove(wdData.group);
+                     // Optional: remove helper
+                    // if (wdData.group.userData.helper) scene.remove(wdData.group.userData.helper);
 
-                // Remove from active list
-                activeWaddleDees.splice(i, 1);
-                // console.log("Waddle Dee Killed!"); // Debug
+                    // Remove from active list
+                    activeWaddleDees.splice(i, 1);
+                    console.log("Waddle Dee Defeated!");
 
-                // Respawn a new Waddle Dee immediately to replace it
-                spawnWaddleDee();
+                    // Respawn a new Waddle Dee immediately
+                    spawnWaddleDee();
 
-                // No need to check other Waddle Dees once one is hit this frame (optional optimization)
-                break; // Exit the Waddle Dee loop after one collision is handled
+                    // Optional: Give Kirby a small bounce
+                    velocityY = jumpForce * 0.5;
+
+                    break; // Only defeat one per frame/check
+                }
             }
-        }
-    } // End Waddle Dee death check (if jumping)
+        } // End Waddle Dee death check loop
+    } // End vertical physics check (if not grounded)
 
     // Apply potential vertical move
     let potentialPosY = kirbyGroup.position.y + velocityY * deltaTime;
@@ -662,6 +835,7 @@ function animate() {
         isGrounded = true;
     } else {
         kirbyGroup.position.y = potentialPosY; // Apply vertical move if not hitting ground
+        isGrounded = false; // Make sure isGrounded is false if in the air
     }
 
 
@@ -671,13 +845,23 @@ function animate() {
     if (isMovingHorizontally && isGrounded) {
         targetRotationZ = Math.sin(elapsedTime * walkCycleSpeed) * walkCycleAmplitude;
     }
-    kirbyGroup.rotation.z = THREE.MathUtils.lerp(kirbyGroup.rotation.z, targetRotationZ, 0.1);
+    // If holding sword, reduce or disable waddle? Optional tweak.
+    let currentWaddleLerp = isKirbyHoldingSword ? 0.05 : 0.1; // Slower lerp if holding sword?
+    kirbyGroup.rotation.z = THREE.MathUtils.lerp(kirbyGroup.rotation.z, targetRotationZ, currentWaddleLerp);
 
 
     // --- Update Waddle Dees ---
     // Iterate backwards using index to safely remove elements with splice
     for (let i = activeWaddleDees.length - 1; i >= 0; i--) {
         const wd = activeWaddleDees[i];
+        // Ensure wd exists before trying to access properties
+        if (!wd || !wd.group || !wd.velocity || !wd.bbox) {
+             console.warn("Invalid Waddle Dee data found at index", i);
+             // Optionally remove the invalid entry
+             // activeWaddleDees.splice(i, 1);
+            continue; // Skip this iteration
+        }
+
         const group = wd.group;
         const velocity = wd.velocity;
 
@@ -687,43 +871,58 @@ function animate() {
             // New random direction (on XZ plane)
             velocity.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
             wd.changeDirTimer = MIN_DIR_CHANGE_TIME + Math.random() * (MAX_DIR_CHANGE_TIME - MIN_DIR_CHANGE_TIME);
-            // console.log("Waddle Dee changed direction"); // Debug
         }
 
         // -- Update Position --
         group.position.addScaledVector(velocity, WADDLE_DEE_SPEED * deltaTime);
 
         // -- Update Rotation (Face Movement Direction) --
-        const targetAngleY = Math.atan2(velocity.x, velocity.z);
-        let currentAngleY = group.rotation.y;
-        let angleDifference = targetAngleY - currentAngleY;
-        while (angleDifference < -Math.PI) angleDifference += Math.PI * 2;
-        while (angleDifference > Math.PI) angleDifference -= Math.PI * 2;
-        group.rotation.y += angleDifference * WADDLE_DEE_TURN_SPEED;
+        const targetAngleY_wd = Math.atan2(velocity.x, velocity.z);
+        let currentAngleY_wd = group.rotation.y;
+        let angleDifference_wd = targetAngleY_wd - currentAngleY_wd;
+        while (angleDifference_wd < -Math.PI) angleDifference_wd += Math.PI * 2;
+        while (angleDifference_wd > Math.PI) angleDifference_wd -= Math.PI * 2;
+        group.rotation.y += angleDifference_wd * WADDLE_DEE_TURN_SPEED;
 
         // -- Ground Clamping --
         group.position.y = WADDLE_DEE_GROUND_LEVEL; // Ensure they stay on ground
+
+        // -- Update Bounding Box --
+        // Recalculate the world bounding box based on the new position
+        const wdBox = wd.bbox;
+        const waddleDeeBoundingBoxSize = { x: 1.4, y: 2.0, z: 1.4 }; // Slightly smaller than Kirby
+
+        const wdSize = waddleDeeBoundingBoxSize; // Use defined size
+        const wdScale = 1.0; // Use defined scale
+        const min = new THREE.Vector3( -wdSize.x/2 * wdScale, 0, -wdSize.z/2 * wdScale );
+        const max = new THREE.Vector3( wdSize.x/2 * wdScale, wdSize.y * wdScale, wdSize.z/2 * wdScale );
+        min.add(group.position);
+        max.add(group.position);
+        wdBox.set(min, max);
+        // Optional: Update helper
+        // if (group.userData.helper) group.userData.helper.box = wdBox;
+
 
         // -- Check Despawn Boundaries --
         if (Math.abs(group.position.x) > despawnBoundary || Math.abs(group.position.z) > despawnBoundary) {
             // Remove from scene
             scene.remove(group);
+             // Optional: remove helper
+            // if (group.userData.helper) scene.remove(group.userData.helper);
 
            // Remove from active list
             activeWaddleDees.splice(i, 1);
             // console.log("Waddle Dee despawned"); // Debug
+
+            // Spawn a replacement immediately
+            spawnWaddleDee();
         }
     } // End Waddle Dee update loop
-
-    spawnWaddleDee();
-
 
     // --- Rendering ---
     renderer.render(scene, camera);
 }
 
-animate();
+animate(); // Start the loop
 
-
-
-console.log("Three.js Kirby setup complete! (UMD version - no server needed)");
+console.log("Three.js Kirby setup complete! Added Sword.");
