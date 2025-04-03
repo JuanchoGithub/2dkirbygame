@@ -63,6 +63,19 @@ let velocityY = 0; // Kirby's current vertical velocity.
 let isGrounded = true; // Starts on the ground.
 const groundLevel = 0.5; // The Y position of the ground Kirby stands on (calculated from before: bodyRadius(1.0) - groundOffset(0.5))
 
+// --- NEW: Flight Variables ---
+let isFlying = false;           // Is Kirby currently in the flying state?
+const flightBoostForce = 10;    // Upward velocity applied per flap (Space press)
+const maxFlightHeight = groundLevel + (jumpForce / Math.sqrt(Math.abs(gravity) * 2)) * 2.5; // Approx 2.5x jump height
+const flightMaxFallSpeed = -5;  // Limit downward speed while puff-falling
+const flightHorizontalDrag = 0.5; // Slow down horizontal movement slightly while flying/falling
+const flightScale = new THREE.Vector3(1.25, 1.25, 1.25); // How much Kirby puffs up
+const armFlapSpeed = 25;        // How fast the arms flap
+const armFlapAmplitude = Math.PI / 3; // How far the arms flap (radians)
+let leftArmMesh = null;         // Reference to left arm mesh
+let rightArmMesh = null;        // Reference to right arm mesh
+const defaultArmRotation = new THREE.Quaternion(); // Store default rotation
+
 // Function to create a simple tree model
 function createTree() {
     const treeGroup = new THREE.Group();
@@ -165,16 +178,23 @@ function createSimpleKirby() {
 
     // Arms (Scaled Spheres)
     const armGeometry = new THREE.SphereGeometry(armRadius, 12, 8);
-    const leftArmMesh = new THREE.Mesh(armGeometry, bodyMaterial);
-    leftArmMesh.position.set(-bodyRadius * 0.85, -bodyRadius * 0.2, bodyRadius * 0.3);
-    leftArmMesh.scale.set(1, armLengthScale, 1);
-    leftArmMesh.castShadow = true;
-    kirbyGroup.add(leftArmMesh);
-    const rightArmMesh = new THREE.Mesh(armGeometry, bodyMaterial);
-    rightArmMesh.position.set(bodyRadius * 0.85, -bodyRadius * 0.2, bodyRadius * 0.3);
-    rightArmMesh.scale.set(1, armLengthScale, 1);
-    rightArmMesh.castShadow = true;
-    kirbyGroup.add(rightArmMesh);
+    const leftArm = new THREE.Mesh(armGeometry, bodyMaterial); // Rename variable for clarity
+    leftArm.position.set(-bodyRadius * 0.85, -bodyRadius * 0.2, bodyRadius * 0.3);
+    leftArm.scale.set(1, armLengthScale, 1);
+    leftArm.castShadow = true;
+    kirbyGroup.add(leftArm);
+    const rightArm = new THREE.Mesh(armGeometry, bodyMaterial); // Rename variable for clarity
+    rightArm.position.set(bodyRadius * 0.85, -bodyRadius * 0.2, bodyRadius * 0.3);
+    rightArm.scale.set(1, armLengthScale, 1);
+    rightArm.castShadow = true;
+    kirbyGroup.add(rightArm);
+
+    // --- Store Arm References ---
+    kirbyGroup.userData.leftArmMesh = leftArm;  // Store reference
+    kirbyGroup.userData.rightArmMesh = rightArm; // Store reference
+    // --- Store Default Arm Rotation ---
+    // (Capture the initial rotation - which is likely identity quaternion)
+    defaultArmRotation.copy(leftArm.quaternion); // Assuming both start same
 
     // Cheeks (Scaled Spheres)
     const cheekGeometry = new THREE.SphereGeometry(cheekRadius, 16, 8);
@@ -672,21 +692,32 @@ const keys = {
 };
 
 document.addEventListener('keydown', (event) => {
-    if (event.code === 'Space' && isGrounded && !isSucking) {
-        velocityY = jumpForce;
-        isGrounded = false;
+    // --- Modified Space Handling ---
+    if (event.code === 'Space' && !isSucking) { // Can't jump/fly while sucking
+        if (isGrounded) {
+            // Standard Jump
+            velocityY = jumpForce;
+            isGrounded = false;
+            isFlying = false; // Ensure not flying when jumping from ground
+        } else if (kirbyGroup.position.y < maxFlightHeight) {
+            // Initiate or Continue Flight (Flap)
+            velocityY = flightBoostForce; // Apply upward boost
+            isFlying = true;              // Set flying state
+        }
+        // If already at max height, space does nothing mid-air
     }
-    else if (event.key.toLowerCase() === 'z' && !isSucking && isGrounded && !suckedWaddleDeeData) { // <<< Added !suckedWaddleDeeData check
-        isSucking = true;
-        suckTimer = SUCK_DURATION;
-        didSuckThisAction = false; // Reset targeting flag
-        suckedWaddleDeeData = null; // <<< ENSURE this is null at the start
-        console.log("Kirby starts sucking!");
-        keys.w = keys.a = keys.s = keys.d = keys.ArrowUp = keys.ArrowLeft = keys.ArrowDown = keys.ArrowRight = false;
-    } else if (keys.hasOwnProperty(event.key)) { // Handle Arrow keys
-         if (!isSucking) {
-            keys[event.key] = true;
-         }
+    // --- Rest of keydown logic (sucking, movement) ---
+    else if (event.key.toLowerCase() === 'z' && !isSucking && isGrounded && !suckedWaddleDeeData) {
+        isSucking = true;             // Set the sucking state to true
+        suckTimer = SUCK_DURATION;    // Reset the timer for how long the suck lasts
+        didSuckThisAction = false;    // Reset the flag for whether a WD has been targeted *this* suck
+    } else if (keys.hasOwnProperty(event.key)) {
+         // --- Prevent movement input while flying? (Optional, Kirby can drift) ---
+         // if (!isFlying) { // Uncomment this block to prevent controlling movement while flying
+             if (!isSucking) {
+                keys[event.key] = true;
+             }
+         // }
     }
 });
 
@@ -738,10 +769,17 @@ function getKirbyWorldBox(position) {
 const kirbyForwardDir = new THREE.Vector3();
 const vectorToWd = new THREE.Vector3();
 
+// ANIMATE function
 function animate() {
     requestAnimationFrame(animate);
     const deltaTime = clock.getDelta();
     const elapsedTime = clock.getElapsedTime();
+    // --- Sucking State Update & Animation ---
+    const mouthMesh = kirbyGroup.userData.mouthMesh; // Get mouth reference
+
+    // --- Get Arm References (once after creation) ---
+    if (!leftArmMesh) leftArmMesh = kirbyGroup.userData.leftArmMesh;
+    if (!rightArmMesh) rightArmMesh = kirbyGroup.userData.rightArmMesh;
 
     getKirbyWorldBox(kirbyGroup.position);
 
@@ -853,10 +891,8 @@ function animate() {
     }
 
 
-    // --- Sucking State Update & Animation ---
-    const mouthMesh = kirbyGroup.userData.mouthMesh; // Get mouth reference
-
     if (isSucking) {
+        isFlying = false; // Cannot fly while sucking
         suckTimer -= deltaTime;
 
         // Apply sucking scale animation (Lerp towards target)
@@ -968,53 +1004,78 @@ function animate() {
     }
 
 
-     // --- Horizontal Movement (Only if not sucking AND not being sucked in) ---
-     let isMovingHorizontally = false;
-     let targetAngleY = kirbyGroup.rotation.y;
+    // --- Horizontal Movement ---
+    let isMovingHorizontally = false;
+    let targetAngleY = kirbyGroup.rotation.y;
+    const moveSpeedBase = 5.0; // Base speed
+    let currentMoveSpeed = moveSpeedBase;
  
      // Allow movement only if not sucking *and* no WD is being animated
      if (!isSucking && !suckedWaddleDeeData) {
-         // ... (rest of horizontal movement logic remains the same) ...
-         const moveSpeed = 5 * deltaTime;
-         const moveDirection = vector3Temp.set(0, 0, 0);
-         if (keys.w || keys.ArrowUp) moveDirection.z -= 1;
-         if (keys.s || keys.ArrowDown) moveDirection.z += 1;
-         if (keys.a || keys.ArrowLeft) moveDirection.x -= 1;
-         if (keys.d || keys.ArrowRight) moveDirection.x += 1;
- 
-         isMovingHorizontally = moveDirection.lengthSq() > 0;
- 
-         if (isMovingHorizontally) {
-             targetAngleY = Math.atan2(moveDirection.x, moveDirection.z);
-             moveDirection.normalize();
- 
-             const currentPos = kirbyGroup.position;
-             const moveDelta = moveDirection.clone().multiplyScalar(moveSpeed);
- 
-             let potentialPosX = currentPos.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
-             let kirbyPotentialBoxX = getKirbyWorldBox(potentialPosX);
-             let collisionX = checkCollision(kirbyPotentialBoxX, 'tree') || checkCollision(kirbyPotentialBoxX, 'waddledee');
- 
-             let potentialPosZ = currentPos.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
-             let kirbyPotentialBoxZ = getKirbyWorldBox(potentialPosZ);
-             let collisionZ = checkCollision(kirbyPotentialBoxZ, 'tree') || checkCollision(kirbyPotentialBoxZ, 'waddledee');
- 
-             if (!collisionX) kirbyGroup.position.x += moveDelta.x;
-             if (!collisionZ) kirbyGroup.position.z += moveDelta.z;
- 
- 
-             let currentAngleY = kirbyGroup.rotation.y;
-             let angleDifference = targetAngleY - currentAngleY;
-             while (angleDifference < -Math.PI) angleDifference += Math.PI * 2;
-             while (angleDifference > Math.PI) angleDifference -= Math.PI * 2;
-             kirbyGroup.rotation.y += angleDifference * turnSpeedFactor;
-         }
+        // --- Apply Flight Drag ---
+        if (isFlying || (!isGrounded && velocityY < 0)) { // Apply drag if flying OR puff-falling
+            currentMoveSpeed *= (1.0 - flightHorizontalDrag * deltaTime); // Simple drag application
+        }
+        const moveDeltaFactor = currentMoveSpeed * deltaTime; // Use potentially reduced speed
+        // ... (rest of horizontal movement logic remains the same) ...
+        const moveSpeed = 5 * deltaTime;
+        const moveDirection = vector3Temp.set(0, 0, 0);
+        if (keys.w || keys.ArrowUp) moveDirection.z -= 1;
+        if (keys.s || keys.ArrowDown) moveDirection.z += 1;
+        if (keys.a || keys.ArrowLeft) moveDirection.x -= 1;
+        if (keys.d || keys.ArrowRight) moveDirection.x += 1;
+
+        isMovingHorizontally = moveDirection.lengthSq() > 0;
+
+        if (isMovingHorizontally) {
+            targetAngleY = Math.atan2(moveDirection.x, moveDirection.z);
+            moveDirection.normalize();
+
+            const currentPos = kirbyGroup.position;
+            const moveDelta = moveDirection.clone().multiplyScalar(moveSpeed);
+
+            let potentialPosX = currentPos.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
+            let kirbyPotentialBoxX = getKirbyWorldBox(potentialPosX);
+            let collisionX = checkCollision(kirbyPotentialBoxX, 'tree') || checkCollision(kirbyPotentialBoxX, 'waddledee');
+
+            let potentialPosZ = currentPos.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
+            let kirbyPotentialBoxZ = getKirbyWorldBox(potentialPosZ);
+            let collisionZ = checkCollision(kirbyPotentialBoxZ, 'tree') || checkCollision(kirbyPotentialBoxZ, 'waddledee');
+
+            if (!collisionX) kirbyGroup.position.x += moveDelta.x;
+            if (!collisionZ) kirbyGroup.position.z += moveDelta.z;
+
+
+            let currentAngleY = kirbyGroup.rotation.y;
+            let angleDifference = targetAngleY - currentAngleY;
+            while (angleDifference < -Math.PI) angleDifference += Math.PI * 2;
+            while (angleDifference > Math.PI) angleDifference -= Math.PI * 2;
+            kirbyGroup.rotation.y += angleDifference * turnSpeedFactor;
+        }
      }
      
    // --- Vertical Movement (Physics) ---
     // ... (Jump stomp logic remains the same) ...
     if (!isGrounded) {
         velocityY += gravity * deltaTime;
+        // --- Limit fall speed when puff-falling ---
+        if (isFlying && velocityY < flightMaxFallSpeed) {
+            velocityY = flightMaxFallSpeed;
+            // Check if we should stop "flying" state if falling too fast/long?
+            // Maybe add a timer or check if space hasn't been pressed recently?
+            // For now, isFlying remains true until landing or hitting ceiling.
+        }
+        // --- Check Max Flight Height ---
+        if (isFlying && kirbyGroup.position.y >= maxFlightHeight && velocityY > 0) {
+            velocityY = 0; // Stop upward movement at ceiling
+            console.log("Reached max flight height!");
+            // isFlying = false; // Optionally stop flight state immediately at ceiling
+        }
+
+        // --- Stomp Check (remains the same, but check !isFlying maybe?) ---
+        // Kirby probably shouldn't stomp while actively flapping up.
+        // Only check stomp if falling (velocityY < 0) and maybe not isFlying?
+        // Let's keep it simple for now: stomp works even while "puff falling".
         if (velocityY < 0) {
             getKirbyWorldBox(kirbyGroup.position);
             for (let i = activeWaddleDees.length - 1; i >= 0; i--) {
@@ -1041,9 +1102,11 @@ function animate() {
         kirbyGroup.position.y = physicsGroundLevel;
         velocityY = 0;
         isGrounded = true;
+        isFlying = false; // <<< *** IMPORTANT: Stop flying when landed ***
     } else {
         kirbyGroup.position.y = potentialPosY;
         isGrounded = false;
+        // isFlying state is managed by input and ceiling/landing checks
     }
 
     // --->>> NEW: KIRBY DEATH CHECK <<<---
@@ -1069,6 +1132,32 @@ function animate() {
     }
     // --->>> END OF DEATH CHECK <<<---
     
+    // Target Scale
+    let targetScale = kirbyInitialScale;
+    if (isSucking) {
+        targetScale = suckTargetScale;
+    } else if (isFlying || (!isGrounded && velocityY < flightBoostForce * 0.5)) { // Puff up if flying OR falling gently
+        targetScale = flightScale;
+    }
+
+    // Lerp Kirby's overall scale
+    if (!kirbyGroup.scale.equals(targetScale)) {
+        kirbyGroup.scale.lerp(targetScale, 0.15);
+         // Snap to target if very close to prevent tiny lerps forever
+         if (kirbyGroup.scale.distanceToSquared(targetScale) < 0.0001) {
+             kirbyGroup.scale.copy(targetScale);
+         }
+    }
+
+    // Mouth Scale (handle sucking case)
+    const targetMouthScale = isSucking ? mouthSuckScale : mouthInitialScale;
+     if (mouthMesh && !mouthMesh.scale.equals(targetMouthScale)) {
+        mouthMesh.scale.lerp(targetMouthScale, 0.2);
+         if (mouthMesh.scale.distanceToSquared(targetMouthScale) < 0.001) {
+             mouthMesh.scale.copy(targetMouthScale);
+         }
+     }
+
     // --- Walk Animation (Z Rotation Waddle) ---
     let targetRotationZ = 0;
     // Only waddle if moving, grounded, NOT sucking, AND not animating a WD suck-in
@@ -1077,6 +1166,38 @@ function animate() {
     }
     let currentWaddleLerp = (isKirbyHoldingSword || isKirbyWearingHelmet) ? 0.03 : 0.1;
     kirbyGroup.rotation.z = THREE.MathUtils.lerp(kirbyGroup.rotation.z, targetRotationZ, currentWaddleLerp);
+
+    // --- NEW: Arm Flapping Animation ---
+    if (leftArmMesh && rightArmMesh) {
+        let targetArmRotation = defaultArmRotation; // Default rotation if not flying
+
+        if (isFlying) {
+            // Calculate flap angle based on time
+            const flapAngle = Math.sin(elapsedTime * armFlapSpeed) * armFlapAmplitude;
+
+            // Create a quaternion for the flap rotation (around X-axis for up/down)
+            // We apply it relative to the default rotation
+            const flapQuaternion = new THREE.Quaternion().setFromAxisAngle(
+                new THREE.Vector3(1, 0, 0), // Flap around local X axis
+                flapAngle
+            );
+
+            // Apply to both arms (one might need negation depending on initial setup, but often not)
+            leftArmMesh.quaternion.copy(defaultArmRotation).multiply(flapQuaternion);
+            // Right arm flaps the opposite way relative to body
+            const flapQuaternionRight = new THREE.Quaternion().setFromAxisAngle(
+                new THREE.Vector3(1, 0, 0),
+               -flapAngle // Use negative angle for the other arm
+            );
+            rightArmMesh.quaternion.copy(defaultArmRotation).multiply(flapQuaternionRight);
+
+        } else {
+            // If not flying, smoothly return arms to default position
+            const lerpFactor = 0.15;
+            leftArmMesh.quaternion.slerp(defaultArmRotation, lerpFactor);
+            rightArmMesh.quaternion.slerp(defaultArmRotation, lerpFactor);
+        }
+    }
 
     // --- Update Waddle Dees ---
     for (let i = activeWaddleDees.length - 1; i >= 0; i--) {
@@ -1129,10 +1250,12 @@ function animate() {
         }
     }
 
+
     // --- Rendering ---
     renderer.render(scene, camera);
 }
 
 animate(); // Start the loop
 
-console.log("Three.js Kirby setup complete! Added Sword, Helmet, and Suck mechanic (Z key).");
+// Modify the console log message slightly
+console.log("Three.js Kirby setup complete! Added Sword, Helmet, Suck (Z), and Flight (Space mid-air).");
