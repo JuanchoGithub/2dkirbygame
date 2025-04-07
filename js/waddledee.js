@@ -80,9 +80,9 @@ export function spawnWaddleDee(groundMesh) {
     waddleDee.boundingBox.setFromObject(waddleDee.mesh); // Initial bounding box
     mesh.rotation.y = Math.atan2(initialVelocity.x, initialVelocity.z); // Face initial direction
 
-    // Create and add helper
+    // Create helper but don't add it or make it invisible
     waddleDee.helper = new THREE.BoxHelper(waddleDee.mesh, 0x0000ff); // Blue helpers for Waddle Dees
-    scene.add(waddleDee.helper);
+    waddleDee.helper.visible = false;
 
     scene.add(waddleDee.mesh);
     activeWaddleDees.push(waddleDee);
@@ -98,8 +98,6 @@ export function spawnWaddleDee(groundMesh) {
 }
 
 export function initializeWaddleDees(scene, groundMesh) {
-    // Remove old helpers when clearing
-    activeWaddleDees.forEach(wd => { if (wd.helper) scene.remove(wd.helper); });
     activeWaddleDees = []; // Clear existing
     for (let i = 0; i < Config.MAX_WADDLEDEES; i++) {
         spawnWaddleDee(groundMesh);
@@ -176,11 +174,6 @@ export function updateWaddleDee(waddleDee, delta, playerPosition) {
              console.error(" -> Bounding box reset to empty.");
          }
     }
-
-    // --- Update the BoxHelper ---
-    if (waddleDee.helper) {
-        waddleDee.helper.update();
-    }
 }
 
 export function updateWaddleDees(deltaTime, scene, groundMesh) {
@@ -197,7 +190,6 @@ export function updateWaddleDees(deltaTime, scene, groundMesh) {
 
         // Check if Waddle Dee should be removed
         if (!waddleDee.mesh || waddleDee.isInhaled || waddleDee.isBeingSucked) {
-            if (waddleDee.helper) scene.remove(waddleDee.helper);
             if (waddleDee.mesh) scene.remove(waddleDee.mesh); // Also remove mesh
             waddleDeeState.delete(waddleDee.mesh?.uuid); // Clean up state map
             activeWaddleDees.splice(i, 1); // Remove from array

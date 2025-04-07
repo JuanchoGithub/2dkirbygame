@@ -50,12 +50,12 @@ export function createBorderWalls(scene) {
         const wallBox = new THREE.Box3().setFromObject(wallMesh);
         wallBoundingBoxes.push(wallBox);
 
-        // Add BoxHelper for the wall
+        // *** HIDE WALL HELPERS ***
         const helper = new THREE.BoxHelper(wallMesh, 0xff0000); // Red helpers for walls
-        scene.add(helper);
+        helper.visible = false;
         wallHelpers.push(helper);
     });
-    console.log("Border walls and helpers created.");
+    console.log("Border walls created (helpers hidden).");
 }
 
 function createTreeMesh() {
@@ -124,13 +124,15 @@ export function placeTrees(scene, groundMesh) {
 
         treeBoundingBoxes.push(treeBox); // Add the calculated box
 
+        // *** HIDE TREE HELPERS ***
         // Helper tracks the trunk mesh visually
         const helper = new THREE.BoxHelper(trunk, 0x00ff00); // Green helper tracks the trunk
-        scene.add(helper);
+        helper.visible = false;
         treeHelpers.push(helper);
     });
     console.log("--- Tree Bounding Boxes Calculation Complete ---");
     console.log("Final treeBoundingBoxes array:", treeBoundingBoxes); // Log the final array
+    console.log("Trees placed (helpers hidden).");
 }
 
 console.log("Environment module loaded.");

@@ -50,6 +50,11 @@ const kirbyForwardDir = new THREE.Vector3(); // Reusable vector for inhale check
 const vectorToTarget = new THREE.Vector3(); // Reusable vector for inhale check
 const suckTargetOffset = new THREE.Vector3(0, 0, Config.KIRBY_SIZE * 0.5); // Point in front of Kirby for particles/target
 
+// Camera-relative movement variables
+const cameraForward = new THREE.Vector3();
+const cameraRight = new THREE.Vector3();
+const moveDirection = new THREE.Vector3(); // Keep this for final direction
+
 // --- Initialize Kirby (Add Particle System) ---
 export function initializeKirby(scene) {
     kirbyGroup = new THREE.Group();
@@ -201,8 +206,21 @@ function updateKirbyBoundingBox() {
 }
 
 // --- Main Update Function ---
-export function updateKirby(deltaTime, elapsedTime, keys, groundMesh) {
-    if (!kirbyGroup || isDead) return;
+// *** ADD camera PARAMETER ***
+export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
+    // *** ADD LOGGING AT THE START ***
+    console.log(`updateKirby called. DeltaTime: ${deltaTime.toFixed(4)}, Camera valid: ${!!camera}`);
+    if (!kirbyGroup || isDead || !camera) {
+        console.log("updateKirby exiting early."); // Log if exiting early
+        return;
+    }
+
+    // --- Drop Power Input ---
+    if (keys.KeyC && currentPower) {
+        console.log("Throwing power:", currentPower);
+        removePower(true); // Call removePower with shouldThrow = true
+        keys.KeyC = false; // Consume the key press
+    }
 
     // --- Waddle Dee Suck-In Animation ---
     if (suckedWaddleDeeData) {
@@ -227,17 +245,26 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh) {
         }
     }
 
-    // --- Movement Input & Direction ---
-    const moveDirection = new THREE.Vector3(0, 0, 0);
+    // --- Movement Input & Direction (Camera Relative) ---
+    moveDirection.set(0, 0, 0);
     let isMovingHorizontally = false;
     let targetRotation = kirbyGroup.rotation.y;
-    let currentMoveSpeed = Config.KIRBY_SPEED; // Base speed
+    let currentMoveSpeed = Config.KIRBY_SPEED;
 
     if (!isInhaling && !suckedWaddleDeeData) {
-        if (keys.ArrowLeft) moveDirection.x -= 1;
-        if (keys.ArrowRight) moveDirection.x += 1;
-        if (keys.ArrowUp) moveDirection.z -= 1;
-        if (keys.ArrowDown) moveDirection.z += 1;
+        // Get camera direction projected onto the ground plane
+        camera.getWorldDirection(cameraForward);
+        cameraForward.y = 0; // Ignore vertical component
+        cameraForward.normalize();
+
+        // Calculate the right vector based on the camera forward vector
+        cameraRight.crossVectors(cameraForward, camera.up).normalize(); // Use camera.up for correct right vector
+        
+        // Calculate movement based on camera orientation
+        if (keys.ArrowUp) moveDirection.add(cameraForward);
+        if (keys.ArrowDown) moveDirection.sub(cameraForward);
+        if (keys.ArrowLeft) moveDirection.sub(cameraRight);
+        if (keys.ArrowRight) moveDirection.add(cameraRight);
 
         isMovingHorizontally = moveDirection.lengthSq() > 0;
 
@@ -247,44 +274,56 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh) {
         }
 
         if (isMovingHorizontally) {
-            targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
             moveDirection.normalize();
-            kirbyVelocity.x = moveDirection.x * currentMoveSpeed; // Use potentially dragged speed
+            targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
+            kirbyVelocity.x = moveDirection.x * currentMoveSpeed;
             kirbyVelocity.z = moveDirection.z * currentMoveSpeed;
+            // *** ADD LOGGING FOR VELOCITY ***
+            console.log(`Moving: Velocity set to X: ${kirbyVelocity.x.toFixed(2)}, Z: ${kirbyVelocity.z.toFixed(2)}`);
         } else {
-            // Apply slight damping if not moving horizontally
+            // Apply slight damping
             kirbyVelocity.x *= (1.0 - deltaTime * 5.0);
             kirbyVelocity.z *= (1.0 - deltaTime * 5.0);
-            if (Math.abs(kirbyVelocity.x) < 0.1) kirbyVelocity.x = 0;
-            if (Math.abs(kirbyVelocity.z) < 0.1) kirbyVelocity.z = 0;
+            if (Math.abs(kirbyVelocity.x) < 0.1 && Math.abs(kirbyVelocity.z) < 0.1 && (kirbyVelocity.x !== 0 || kirbyVelocity.z !== 0)) {
+                 // *** ADD LOGGING FOR DAMPING STOP ***
+                 console.log("Damping stopped horizontal velocity.");
+                 kirbyVelocity.x = 0;
+                 kirbyVelocity.z = 0;
+            }
         }
     } else {
+        // *** ADD LOGGING IF MOVEMENT IS BLOCKED BY STATE ***
+        if (isInhaling) console.log("Movement blocked: Inhaling");
+        if (suckedWaddleDeeData) console.log("Movement blocked: Sucking WD");
         kirbyVelocity.x = 0;
         kirbyVelocity.z = 0;
         isMovingHorizontally = false;
     }
 
+    // Smooth Rotation
     let currentAngleY = kirbyGroup.rotation.y;
     let angleDifference = targetRotation - currentAngleY;
     while (angleDifference < -Math.PI) angleDifference += Math.PI * 2;
     while (angleDifference > Math.PI) angleDifference -= Math.PI * 2;
-    kirbyGroup.rotation.y += angleDifference * 0.15;
+    if (isMovingHorizontally || Math.abs(angleDifference) > 0.01) {
+         kirbyGroup.rotation.y += angleDifference * 0.15;
+    }
 
     // --- Jumping & Flight (Replaces old Jump/Float) ---
     const isGrounded = kirbyGroup.position.y <= Config.GROUND_Y + Config.KIRBY_SIZE / 2 + 0.01;
 
     if (keys.Space && !isInhaling && !suckedWaddleDeeData) {
-        if (isGrounded) { // Initial Jump
+        if (isGrounded) {
             kirbyVelocity.y = Config.KIRBY_JUMP_VELOCITY;
             isJumping = true;
-            isFlying = false; // Not flying on initial jump
-            canDoubleJump = true; // Allow subsequent flight boosts
-        } else if (canDoubleJump && kirbyGroup.position.y < Config.KIRBY_MAX_FLIGHT_HEIGHT) { // Flight Boost
+            isFlying = false;
+            canDoubleJump = true;
+        } else if (canDoubleJump && kirbyGroup.position.y < Config.KIRBY_MAX_FLIGHT_HEIGHT) {
             kirbyVelocity.y = Config.KIRBY_FLIGHT_BOOST;
-            isFlying = true; // Enter flight state
-            isJumping = false; // Not considered a standard jump anymore
+            isFlying = true;
+            isJumping = false;
         }
-        keys.Space = false; // Consume Space press for this frame
+        keys.Space = false;
     }
 
     // --- Apply Gravity ---
@@ -398,9 +437,11 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh) {
     // --- Update Position ---
     const deltaPosition = kirbyVelocity.clone().multiplyScalar(deltaTime);
     const targetPosition = kirbyGroup.position.clone().add(deltaPosition);
+    // *** ADD LOGGING FOR POSITION CHANGE ATTEMPT ***
+    console.log(`Attempting position change: dX: ${deltaPosition.x.toFixed(3)}, dY: ${deltaPosition.y.toFixed(3)}, dZ: ${deltaPosition.z.toFixed(3)}`);
 
     // --- Collision Detection & Resolution ---
-    updateKirbyBoundingBox(); // Update box based on *current* position
+    updateKirbyBoundingBox();
 
     if (targetPosition.y < Config.GROUND_Y + Config.KIRBY_SIZE / 2) {
         targetPosition.y = Config.GROUND_Y + Config.KIRBY_SIZE / 2;
@@ -417,83 +458,59 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh) {
     let collisionZ = false;
     const allObstacles = [...wallBoundingBoxes, ...treeBoundingBoxes];
 
-    allObstacles.forEach((obstacleBox, index) => { // Add index for logging
+    allObstacles.forEach((obstacleBox, index) => {
         if (futureBoundingBox.intersectsBox(obstacleBox)) {
-            // *** Log which obstacle box is being hit ***
-            const isWall = index < wallBoundingBoxes.length;
-            const obstacleType = isWall ? `Wall ${index}` : `Tree ${index - wallBoundingBoxes.length}`;
-            console.log(`Kirby futureBox intersects with ${obstacleType}`);
-            console.log(`  Obstacle Box Min:`, obstacleBox.min.toArray().map(n => n.toFixed(2)));
-            console.log(`  Obstacle Box Max:`, obstacleBox.max.toArray().map(n => n.toFixed(2)));
-            console.log(`  Kirby Future Box Min:`, futureBoundingBox.min.toArray().map(n => n.toFixed(2)));
-            console.log(`  Kirby Future Box Max:`, futureBoundingBox.max.toArray().map(n => n.toFixed(2)));
-
-
             const xOnlyBox = kirbyBoundingBox.clone().translate(new THREE.Vector3(deltaPosition.x, 0, 0));
             if (xOnlyBox.intersectsBox(obstacleBox)) {
-                 console.log(`    Collision detected on X axis with ${obstacleType}`);
                  collisionX = true;
             }
             const zOnlyBox = kirbyBoundingBox.clone().translate(new THREE.Vector3(0, 0, deltaPosition.z));
             if (zOnlyBox.intersectsBox(obstacleBox)) {
-                 console.log(`    Collision detected on Z axis with ${obstacleType}`);
                  collisionZ = true;
             }
-            // Optimization: If both flags are true, no need to check further obstacles
-            // if (collisionX && collisionZ) return; // Can uncomment later if needed
         }
     });
 
+    // *** ADD LOGGING FOR COLLISION RESULTS ***
+    console.log(`Collision check results: collisionX=${collisionX}, collisionZ=${collisionZ}`);
+
     // Apply position changes based on collision flags
+    const originalPosition = kirbyGroup.position.clone(); // Store position before applying changes
     if (!collisionX) kirbyGroup.position.x = targetPosition.x; else kirbyVelocity.x = 0;
     if (!collisionZ) kirbyGroup.position.z = targetPosition.z; else kirbyVelocity.z = 0;
-    kirbyGroup.position.y = targetPosition.y; // Apply Y position regardless of X/Z collision
+    kirbyGroup.position.y = targetPosition.y;
+
+    // *** ADD LOGGING FOR FINAL POSITION ***
+    console.log(`Position updated: Old(${originalPosition.x.toFixed(2)}, ${originalPosition.z.toFixed(2)}) -> New(${kirbyGroup.position.x.toFixed(2)}, ${kirbyGroup.position.z.toFixed(2)})`);
 
     // *** Update Bounding Box AFTER final position update for interactions ***
-    updateKirbyBoundingBox(); // Update box to final position
+    updateKirbyBoundingBox();
 
     // --- Stomp Check ---
-    // Check if Kirby is falling fast enough and not currently flying (puffing)
     const isStomping = kirbyVelocity.y < -Config.KIRBY_JUMP_VELOCITY * 0.5 && !isFlying;
 
     if (isStomping) {
         activeWaddleDees.forEach((waddleDee, index) => {
-            // Check only valid Waddle Dees that aren't already being sucked/inhaled
             if (waddleDee.mesh && !waddleDee.isInhaled && !waddleDee.isBeingSucked) {
-                // Use the updated kirbyBoundingBox for the check
                 if (kirbyBoundingBox.intersectsBox(waddleDee.boundingBox)) {
                     console.log("Kirby stomped a Waddle Dee!");
-                    // Remove Waddle Dee
                     scene.remove(waddleDee.mesh);
-                    if (waddleDee.helper) scene.remove(waddleDee.helper); // Remove helper too
+                    if (waddleDee.helper) scene.remove(waddleDee.helper);
                     activeWaddleDees.splice(index, 1);
-
-                    // Spawn a new one (optional, based on game design)
                     spawnWaddleDee(scene, groundMesh);
-
-                    // Give Kirby a bounce
                     kirbyVelocity.y = Config.KIRBY_JUMP_VELOCITY * Config.STOMP_BOUNCE_FACTOR;
-                    isJumping = true; // Kirby is now jumping from the bounce
-                    canDoubleJump = true; // Allow flight after stomp bounce
-                    isFlying = false; // Ensure not in flying state after stomp
-
-                    // Exit the loop for this frame after stomping one enemy
+                    isJumping = true;
+                    canDoubleJump = true;
+                    isFlying = false;
                     return;
                 }
             }
         });
-    } else if (!isInhaling && !suckedWaddleDeeData && !isStomping) { // --- Regular Collision Check (Only if NOT stomping) ---
+    } else if (!isInhaling && !suckedWaddleDeeData && !isStomping) {
         activeWaddleDees.forEach((waddleDee) => {
             if (waddleDee.mesh && !waddleDee.isInhaled && !waddleDee.isBeingSucked) {
                 if (kirbyBoundingBox.intersectsBox(waddleDee.boundingBox)) {
                     console.error("GAME OVER: Kirby touched a Waddle Dee!");
-                    console.log("Kirby Position:", kirbyGroup.position.toArray().map(n => n.toFixed(2)));
-                    console.log("Kirby BBox Min:", kirbyBoundingBox.min.toArray().map(n => n.toFixed(2)));
-                    console.log("Kirby BBox Max:", kirbyBoundingBox.max.toArray().map(n => n.toFixed(2)));
-                    console.log("WaddleDee Position:", waddleDee.mesh.position.toArray().map(n => n.toFixed(2)));
-                    console.log("WaddleDee BBox Min:", waddleDee.boundingBox.min.toArray().map(n => n.toFixed(2)));
-                    console.log("WaddleDee BBox Max:", waddleDee.boundingBox.max.toArray().map(n => n.toFixed(2)));
-
                     isDead = true;
                     alert("Game Over! Kirby touched a Waddle Dee.");
                     window.location.reload();
@@ -537,7 +554,6 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh) {
         }
     }
 
-    // *** Update the Bounding Box Helper AFTER all Kirby updates ***
     if (kirbyBBHelper) {
         kirbyBBHelper.update();
     }
@@ -552,77 +568,106 @@ function getKirbyWorldBox(position) {
 }
 
 // --- Give Power ---
-export function givePower(powerName, itemMesh) { // itemMesh is the actual THREE.Group/Mesh
+export function givePower(powerName, itemMesh) {
     if (currentPower) {
         console.log("Kirby already has a power, cannot pick up", powerName);
-        return false; // Indicate power was not given
+        return false;
     }
-    if (!itemMesh) { // Add a check for valid mesh
+    if (!itemMesh) {
         console.error("givePower called with invalid itemMesh for", powerName);
         return false;
     }
 
-    // Remove previous power visuals if any
     removePower();
 
     currentPower = powerName;
     console.log(`Kirby gained ${powerName} power!`);
 
     if (powerName === 'sword') {
-        // Create visual helmet for sword power
         const helmetGeometry = new THREE.ConeGeometry(Config.HELMET_SIZE * 0.8, Config.HELMET_SIZE * 1.2, 4);
-        const helmetMaterial = new THREE.MeshStandardMaterial({ color: Config.HELMET_COLOR });
+        const helmetMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
         helmetMesh = new THREE.Mesh(helmetGeometry, helmetMaterial);
         helmetMesh.position.y = Config.KIRBY_SIZE * 0.45;
         helmetMesh.rotation.y = Math.PI / 4;
         helmetMesh.castShadow = true;
-        kirbyGroup.add(helmetMesh); // Add visual helmet
+        kirbyGroup.add(helmetMesh);
 
-        // Attach the actual sword item mesh
-        swordMesh = itemMesh; // Assign the passed mesh
-        kirbyGroup.add(swordMesh); // *** Add the itemMesh to Kirby's group ***
-        // Set position/rotation/scale relative to Kirby
-        swordMesh.position.set(Config.KIRBY_SIZE * 0.4, Config.KIRBY_SIZE * 0.1, Config.KIRBY_SIZE * 0.2);
-        swordMesh.rotation.set(0, Math.PI / 4, -Math.PI / 2.5);
+        swordMesh = itemMesh;
+        kirbyGroup.add(swordMesh);
+        swordMesh.position.set(Config.KIRBY_SIZE * 0.35, -Config.KIRBY_SIZE * 0.1, Config.KIRBY_SIZE * 0.3);
+        swordMesh.rotation.set(Math.PI / 2.2, Math.PI / 4, -Math.PI / 2);
         swordMesh.scale.set(0.6, 0.6, 0.6);
         swordMesh.castShadow = true;
 
     } else if (powerName === 'helmet') {
-        // Attach the actual helmet item mesh
-        helmetMesh = itemMesh; // Assign the passed mesh
-        kirbyGroup.add(helmetMesh); // *** Add the itemMesh to Kirby's group ***
-        // Set position/rotation/scale relative to Kirby
+        helmetMesh = itemMesh;
+        kirbyGroup.add(helmetMesh);
         const kirbyHeadY = Config.KIRBY_SIZE * 0.4;
         helmetMesh.position.set(0, kirbyHeadY, 0.1);
-        helmetMesh.rotation.set(0, 0, 0); // Reset rotation relative to Kirby
-        helmetMesh.scale.set(0.9, 0.9, 0.9); // Adjust scale to fit Kirby
+        helmetMesh.rotation.set(0, 0, 0);
+        helmetMesh.scale.set(0.9, 0.9, 0.9);
         helmetMesh.castShadow = true;
     }
-    // Add logic for other powers here
 
-    return true; // Indicate power was successfully given
+    return true;
 }
 
 // --- Remove Power ---
-export function removePower() {
+export function removePower(shouldThrow = false) {
     if (!currentPower) return;
 
     console.log(`Kirby lost ${currentPower} power.`);
+    let itemToRespawn = null; // Keep track of the mesh to potentially respawn
+
     if (currentPower === 'sword') {
         if (helmetMesh) kirbyGroup.remove(helmetMesh);
         if (swordMesh) {
+            itemToRespawn = swordMesh; // Store the sword mesh
             kirbyGroup.remove(swordMesh);
         }
         helmetMesh = null;
         swordMesh = null;
     } else if (currentPower === 'helmet') {
         if (helmetMesh) {
+            itemToRespawn = helmetMesh; // Store the helmet mesh
             kirbyGroup.remove(helmetMesh);
         }
         helmetMesh = null;
     }
+
+    // *** Item Throwing Logic ***
+    if (shouldThrow && itemToRespawn) {
+        // Get Kirby's forward direction
+        const throwDirection = new THREE.Vector3();
+        kirbyGroup.getWorldDirection(throwDirection);
+        throwDirection.y = 0.3; // Give it some upward lift
+        throwDirection.normalize();
+
+        // Calculate throw position slightly in front of Kirby
+        const throwPosition = kirbyGroup.position.clone()
+            .add(throwDirection.clone().multiplyScalar(Config.KIRBY_SIZE * 1.5)); // Throw 1.5 Kirby sizes away
+        throwPosition.y = Config.GROUND_Y + 0.2; // Place slightly above ground
+
+        itemToRespawn.position.copy(throwPosition);
+        // Reset rotation/scale if needed (depends on how items.js handles spawning)
+        itemToRespawn.rotation.set(0, Math.random() * Math.PI * 2, Math.PI / 1.5); // Example reset
+        itemToRespawn.scale.set(1, 1, 1); // Reset scale
+
+        // Apply initial velocity to the item
+        const throwVelocity = throwDirection.multiplyScalar(10); // Adjust throw strength
+        itemToRespawn.userData.velocity = throwVelocity; // Store velocity in userData for per-frame updates
+        itemToRespawn.userData.isThrowable = true; // Flag to indicate it's being thrown
+
+        scene.add(itemToRespawn); // Add back to the main scene
+
+        // Add to items array so it can be picked up again
+        // activeItems.push(itemToRespawn); // Add back to the active items array
+        // console.log(`Respawned ${currentPower} item visually near Kirby.`);
+    }
+
+
     currentPower = null;
-    inhaledObject = null;
+    inhaledObject = null; // Clear inhaled object too when power is lost
 }
 
 export function getKirbyBoundingBox() {

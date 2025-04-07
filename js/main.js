@@ -33,7 +33,7 @@ function animate() {
 
     // --- Update Game Logic ---
     // Update Kirby first to get his position
-    updateKirby(deltaTime, elapsedTime, keys, groundMesh, null); // Pass null for camera, controls handle it
+    updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera); // Pass camera
     updateWaddleDees(deltaTime, scene, groundMesh);
     updateItems(deltaTime, scene);
 

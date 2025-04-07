@@ -196,6 +196,25 @@ export function updateItems(deltaTime, scene) {
             item.mesh.rotation.y += 0.01;
         }
     }
+
+    // --- Update Thrown Items ---
+    scene.children.forEach(child => {
+        if (child.userData && child.userData.isThrowable) {
+            // Apply gravity
+            if (!child.userData.velocity) {
+                child.userData.velocity = new THREE.Vector3();
+            }
+            child.userData.velocity.y += Config.GRAVITY * deltaTime;
+            child.position.add(child.userData.velocity.clone().multiplyScalar(deltaTime));
+
+            // Ground collision check
+            if (child.position.y <= Config.GROUND_Y + 0.2) {
+                child.position.y = Config.GROUND_Y + 0.2;
+                child.userData.velocity.set(0, 0, 0); // Stop movement
+                child.userData.isThrowable = false; // No longer throwable
+            }
+        }
+    });
 }
 
 console.log("Items module loaded.");
