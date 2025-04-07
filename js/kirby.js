@@ -4,6 +4,7 @@ import { checkCollision } from './utils.js';
 import { wallBoundingBoxes, treeBoundingBoxes } from './environment.js'; // Import tree boxes too
 import { scene } from './sceneSetup.js';
 import { activeWaddleDees, startWaddleDeeSuck, spawnWaddleDee } from './waddledee.js'; // Import Waddle Dee functions
+import * as items from './items.js'; // Import the entire items module
 
 // Kirby state variables
 export let kirbyGroup;
@@ -661,10 +662,9 @@ export function removePower(shouldThrow = false) {
         scene.add(itemToRespawn); // Add back to the main scene
 
         // Add to items array so it can be picked up again
-        // activeItems.push(itemToRespawn); // Add back to the active items array
-        // console.log(`Respawned ${currentPower} item visually near Kirby.`);
+        items.activeItems.push(itemToRespawn); // Add back to the active items array using items.activeItems
+        console.log(`Respawned ${currentPower} item visually near Kirby.`);
     }
-
 
     currentPower = null;
     inhaledObject = null; // Clear inhaled object too when power is lost

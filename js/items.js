@@ -3,7 +3,7 @@ import * as Config from './config.js';
 import { getRandomPositionOnGround, checkCollision } from './utils.js';
 import { getKirbyBoundingBox, givePower } from './kirby.js'; // Import Kirby functions
 
-let activeItems = []; // Store active items {mesh, type, boundingBox}
+export let activeItems = []; // Store active items {mesh, type, boundingBox}
 const MIN_SPAWN_DIST_FROM_CENTER = 3;
 const MIN_DIST_BETWEEN_ITEMS = 5;
 
@@ -210,8 +210,14 @@ export function updateItems(deltaTime, scene) {
             // Ground collision check
             if (child.position.y <= Config.GROUND_Y + 0.2) {
                 child.position.y = Config.GROUND_Y + 0.2;
-                child.userData.velocity.set(0, 0, 0); // Stop movement
-                child.userData.isThrowable = false; // No longer throwable
+
+                // *** BOUNCE EFFECT ***
+                if (child.userData.velocity.y < -2) { // Only bounce if falling with significant speed
+                    child.userData.velocity.y = -child.userData.velocity.y * 0.5; // Reverse and dampen velocity
+                } else {
+                    child.userData.velocity.set(0, 0, 0); // Stop movement
+                    child.userData.isThrowable = false; // No longer throwable
+                }
             }
         }
     });
