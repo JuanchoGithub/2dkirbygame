@@ -1,7 +1,7 @@
 // Import necessary modules (paths relative to main.js)
 // Note: THREE is loaded globally via script tag in index.html,
 // but modules can still import it if they need explicit access.
-// import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
 import { scene, camera, renderer } from './sceneSetup.js';
 import { keys, initializeInput } from './input.js';

@@ -124,8 +124,8 @@ export function placeTrees(scene, groundMesh) {
 
         treeBoundingBoxes.push(treeBox); // Add the calculated box
 
-        // Helper still tracks the whole tree visually
-        const helper = new THREE.BoxHelper(treeMeshGroup, 0x00ff00);
+        // Helper tracks the trunk mesh visually
+        const helper = new THREE.BoxHelper(trunk, 0x00ff00); // Green helper tracks the trunk
         scene.add(helper);
         treeHelpers.push(helper);
     });

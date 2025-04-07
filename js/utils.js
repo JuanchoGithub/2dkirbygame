@@ -9,6 +9,7 @@ export function checkCollision(box1, box2) {
 // Get a random position on the ground plane within bounds
 export function getRandomPositionOnGround(groundMesh, objectRadius = 1) {
     const groundSize = Config.GROUND_SIZE;
+    // Calculate boundaries ensuring the object stays fully within the ground plane
     const minX = -groundSize / 2 + objectRadius;
     const maxX = groundSize / 2 - objectRadius;
     const minZ = -groundSize / 2 + objectRadius;
@@ -16,7 +17,7 @@ export function getRandomPositionOnGround(groundMesh, objectRadius = 1) {
 
     const x = THREE.MathUtils.randFloat(minX, maxX);
     const z = THREE.MathUtils.randFloat(minZ, maxZ);
-    // Assuming ground is at y=0, place object slightly above
+    // Place object slightly above the ground level
     const y = Config.GROUND_Y + objectRadius;
 
     return new THREE.Vector3(x, y, z);

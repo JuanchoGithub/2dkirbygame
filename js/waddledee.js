@@ -1,11 +1,15 @@
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 import * as Config from './config.js';
 import { checkCollision, getRandomPositionOnGround } from './utils.js';
-import { wallBoundingBoxes, treeBoundingBoxes } from './environment.js'; // Import tree boxes too
+import { wallBoundingBoxes, treeBoundingBoxes } from './environment.js';
+import { scene } from './sceneSetup.js'; // Import scene from sceneSetup.js
 
 export let activeWaddleDees = [];
 let lastSpawnTime = 0;
 const vector3Temp = new THREE.Vector3(); // Reusable vector
+
+// Store waddle dee state like target position, speed etc.
+const waddleDeeState = new Map();
 
 function createWaddleDeeMesh() {
     const group = new THREE.Group();
@@ -48,7 +52,7 @@ function createWaddleDeeMesh() {
     return group;
 }
 
-export function spawnWaddleDee(scene, groundMesh) {
+export function spawnWaddleDee(groundMesh) {
     if (activeWaddleDees.length >= Config.MAX_WADDLEDEES) return; // Don't spawn if max reached
 
     const mesh = createWaddleDeeMesh();
@@ -83,7 +87,14 @@ export function spawnWaddleDee(scene, groundMesh) {
     scene.add(waddleDee.mesh);
     activeWaddleDees.push(waddleDee);
 
+    // Initialize state for the new waddle dee
+    waddleDeeState.set(waddleDee.mesh.uuid, {
+        targetPosition: getRandomPositionOnGround(groundMesh, Config.WADDLEDEE_RADIUS),
+        speed: Config.WADDLEDEE_SPEED * (0.8 + Math.random() * 0.4) // Add some variation
+    });
+
     console.log("Spawned Waddle Dee at", position.toArray().map(n => n.toFixed(2)));
+    return waddleDee;
 }
 
 export function initializeWaddleDees(scene, groundMesh) {
@@ -91,88 +102,112 @@ export function initializeWaddleDees(scene, groundMesh) {
     activeWaddleDees.forEach(wd => { if (wd.helper) scene.remove(wd.helper); });
     activeWaddleDees = []; // Clear existing
     for (let i = 0; i < Config.MAX_WADDLEDEES; i++) {
-        spawnWaddleDee(scene, groundMesh);
+        spawnWaddleDee(groundMesh);
     }
     lastSpawnTime = Date.now(); // Set initial time
     console.log("Waddle Dees initialized.");
+}
+
+export function updateWaddleDee(waddleDee, delta, playerPosition) {
+    const state = waddleDeeState.get(waddleDee.mesh.uuid);
+    if (!state || !waddleDee.mesh) return; // Added check for mesh existence
+
+    const currentPosition = waddleDee.mesh.position;
+    const targetPosition = state.targetPosition;
+
+    // Move towards target
+    const direction = new THREE.Vector3().subVectors(targetPosition, currentPosition);
+    let distanceSq = direction.lengthSq(); // Calculate distance squared
+
+    // If close enough to the target, pick a new random target
+    if (distanceSq < 1) { // Threshold distance squared (1*1)
+        state.targetPosition = getRandomPositionOnGround(null, Config.WADDLEDEE_SIZE / 2); // Use WADDLEDEE_SIZE
+        // Recalculate direction for this frame
+        direction.subVectors(state.targetPosition, currentPosition);
+        // Recalculate distanceSq after getting new target
+        distanceSq = direction.lengthSq(); // Reassignment requires 'let'
+    }
+
+    // --- Check for near-zero direction before normalizing ---
+    if (distanceSq > 0.0001) { // Only normalize and move if direction is significant
+        direction.normalize();
+        const moveDistance = state.speed * delta;
+        waddleDee.mesh.position.addScaledVector(direction, moveDistance);
+
+        // Optional: Make Waddle Dee face the direction it's moving
+        const angle = Math.atan2(direction.x, direction.z);
+        waddleDee.mesh.rotation.y = angle;
+
+    } else {
+        // If direction is too small, don't move this frame
+        // This prevents potential NaN from normalizing a zero vector
+    }
+
+    // --- Boundary Clamping ---
+    const halfGround = Config.GROUND_SIZE / 2;
+    const radius = Config.WADDLEDEE_SIZE / 2; // Use the actual radius
+
+    waddleDee.mesh.position.x = Math.max(-halfGround + radius, Math.min(halfGround - radius, waddleDee.mesh.position.x));
+    waddleDee.mesh.position.z = Math.max(-halfGround + radius, Math.min(halfGround - radius, waddleDee.mesh.position.z));
+    // Keep Y fixed on the ground
+    waddleDee.mesh.position.y = Config.GROUND_Y + radius;
+    // --- End Boundary Clamping ---
+
+    // --- Validate Position before updating BBox ---
+    if (isNaN(waddleDee.mesh.position.x) || isNaN(waddleDee.mesh.position.y) || isNaN(waddleDee.mesh.position.z)) {
+        console.error("Waddle Dee position became NaN! Resetting position.", waddleDee.mesh.uuid);
+        // Reset to a safe position (e.g., center or previous valid position)
+        waddleDee.mesh.position.set(0, Config.GROUND_Y + radius, 0);
+        // Optionally, give it a new target immediately
+        state.targetPosition = getRandomPositionOnGround(null, radius);
+    }
+
+    // Update bounding box
+    waddleDee.boundingBox.setFromObject(waddleDee.mesh);
+
+    // --- Validate Bounding Box ---
+    if (isNaN(waddleDee.boundingBox.min.x) || isNaN(waddleDee.boundingBox.max.x)) {
+         console.error("Waddle Dee bounding box became NaN after update!", waddleDee.mesh.uuid);
+         // Attempt to recalculate or reset
+         waddleDee.boundingBox.setFromObject(waddleDee.mesh); // Try again
+         if (isNaN(waddleDee.boundingBox.min.x)) {
+             // If still NaN, make it empty to avoid collision issues
+             waddleDee.boundingBox.makeEmpty();
+             console.error(" -> Bounding box reset to empty.");
+         }
+    }
+
+    // --- Update the BoxHelper ---
+    if (waddleDee.helper) {
+        waddleDee.helper.update();
+    }
 }
 
 export function updateWaddleDees(deltaTime, scene, groundMesh) {
     const now = Date.now();
 
     if (activeWaddleDees.length < Config.MAX_WADDLEDEES && now - lastSpawnTime > Config.WADDLEDEE_SPAWN_INTERVAL) {
-        spawnWaddleDee(scene, groundMesh);
+        spawnWaddleDee(groundMesh);
         lastSpawnTime = now;
     }
 
-    activeWaddleDees.forEach((waddleDee, index) => {
-        // Remove helper if WD is removed
+    // Iterate backwards to safely remove elements
+    for (let i = activeWaddleDees.length - 1; i >= 0; i--) {
+        const waddleDee = activeWaddleDees[i];
+
+        // Check if Waddle Dee should be removed
         if (!waddleDee.mesh || waddleDee.isInhaled || waddleDee.isBeingSucked) {
             if (waddleDee.helper) scene.remove(waddleDee.helper);
-            if (waddleDee.isInhaled && !waddleDee.isBeingSucked) {
-                activeWaddleDees.splice(index, 1);
-                console.log("Removed inhaled Waddle Dee from active list.");
-            }
-            return;
+            if (waddleDee.mesh) scene.remove(waddleDee.mesh); // Also remove mesh
+            waddleDeeState.delete(waddleDee.mesh?.uuid); // Clean up state map
+            activeWaddleDees.splice(i, 1); // Remove from array
+            console.log("Removed Waddle Dee.");
+            continue; // Skip update for this removed Waddle Dee
         }
 
-        const group = waddleDee.mesh;
-        const velocity = waddleDee.velocity;
-
-        waddleDee.changeDirTimer -= deltaTime;
-        if (waddleDee.changeDirTimer <= 0) {
-            const newAngle = Math.random() * Math.PI * 2;
-            velocity.set(Math.sin(newAngle), 0, Math.cos(newAngle));
-            waddleDee.changeDirTimer = Config.WADDLEDEE_MIN_DIR_CHANGE_TIME + Math.random() * (Config.WADDLEDEE_MAX_DIR_CHANGE_TIME - Config.WADDLEDEE_MIN_DIR_CHANGE_TIME);
-        }
-
-        let adjustedVelocity = velocity.clone();
-        let pushForce = new THREE.Vector3();
-        let avoiding = false;
-        const allObstacles = [...wallBoundingBoxes, ...treeBoundingBoxes];
-
-        for (const obstacleBox of allObstacles) {
-            if (waddleDee.boundingBox.intersectsBox(obstacleBox)) {
-                pushForce.subVectors(group.position, obstacleBox.getCenter(vector3Temp)).setY(0).normalize();
-                adjustedVelocity.add(pushForce.multiplyScalar(0.5));
-                avoiding = true;
-            }
-        }
-
-        for (let j = 0; j < activeWaddleDees.length; j++) {
-            if (index === j) continue;
-            const otherWd = activeWaddleDees[j];
-            if (!otherWd.mesh || otherWd.isInhaled || otherWd.isBeingSucked) continue;
-            if (waddleDee.boundingBox.intersectsBox(otherWd.boundingBox)) {
-                pushForce.subVectors(group.position, otherWd.mesh.position).setY(0).normalize();
-                adjustedVelocity.add(pushForce.multiplyScalar(0.3));
-                avoiding = true;
-            }
-        }
-
-        if (avoiding) {
-            adjustedVelocity.normalize();
-            waddleDee.changeDirTimer = Math.min(waddleDee.changeDirTimer, 0.5);
-        }
-
-        group.position.y = Config.GROUND_Y + Config.WADDLEDEE_SIZE / 2;
-
-        const moveDelta = adjustedVelocity.clone().multiplyScalar(Config.WADDLEDEE_SPEED * deltaTime);
-        group.position.add(moveDelta);
-
-        const targetAngleY_wd = Math.atan2(adjustedVelocity.x, adjustedVelocity.z);
-        let currentAngleY_wd = group.rotation.y;
-        let angleDifference_wd = targetAngleY_wd - currentAngleY_wd;
-        while (angleDifference_wd < -Math.PI) angleDifference_wd += Math.PI * 2;
-        while (angleDifference_wd > Math.PI) angleDifference_wd -= Math.PI * 2;
-        group.rotation.y += angleDifference_wd * Config.WADDLEDEE_TURN_SPEED;
-
-        // Update bounding box AND helper
-        waddleDee.boundingBox.setFromObject(waddleDee.mesh);
-        if (waddleDee.helper) {
-            waddleDee.helper.update(); // Update helper based on mesh's world matrix
-        }
-    });
+        // Update the Waddle Dee if it's still active
+        updateWaddleDee(waddleDee, deltaTime, null); // Pass null for playerPosition if not needed here
+    }
 }
 
 export function startWaddleDeeSuck(waddleDee, targetPos, startTime) {

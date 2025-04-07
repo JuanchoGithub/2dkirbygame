@@ -178,25 +178,24 @@ function createSuckParticles() {
 
 // --- Update Kirby Bounding Box ---
 function updateKirbyBoundingBox() {
-    if (!kirbyGroup || !kirbyMesh) return;
+    if (!kirbyGroup) return; // Only need to check for group now
 
     try {
-        if (!kirbyMesh.geometry) {
-            console.error("Kirby mesh geometry is missing!");
-            return;
-        }
-        // Calculate the world bounding box based on the mesh and group transform
+        // Calculate the world bounding box based on the ENTIRE group
         kirbyGroup.updateMatrixWorld(true); // Ensure world matrix is up-to-date
-        kirbyBoundingBox.setFromObject(kirbyMesh, true); // Get local box from mesh
-        kirbyBoundingBox.applyMatrix4(kirbyGroup.matrixWorld); // Transform to world space
+        kirbyBoundingBox.setFromObject(kirbyGroup, true); // Get world box from the entire group
 
         if (isNaN(kirbyBoundingBox.min.x) || !isFinite(kirbyBoundingBox.min.x)) {
              console.error("Kirby bounding box calculation resulted in invalid values.");
+             // Reset to a default small box at origin to prevent further errors
+             kirbyBoundingBox.makeEmpty();
              return;
         }
 
     } catch (error) {
         console.error("Error calculating Kirby bounding box:", error);
+        // Reset to a default small box at origin
+        kirbyBoundingBox.makeEmpty();
         return;
     }
 }
@@ -453,28 +452,37 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
     // *** Update Bounding Box AFTER final position update for interactions ***
     updateKirbyBoundingBox(); // Update box to final position
 
+    // --- Stomp Check ---
+    // Check if Kirby is falling fast enough and not currently flying (puffing)
     const isStomping = kirbyVelocity.y < -Config.KIRBY_JUMP_VELOCITY * 0.5 && !isFlying;
+
     if (isStomping) {
         activeWaddleDees.forEach((waddleDee, index) => {
+            // Check only valid Waddle Dees that aren't already being sucked/inhaled
             if (waddleDee.mesh && !waddleDee.isInhaled && !waddleDee.isBeingSucked) {
-                const stompCheckPos = kirbyGroup.position.clone();
-                stompCheckPos.y -= 0.1;
-                const stompCheckBox = getKirbyWorldBox(stompCheckPos);
-
-                if (stompCheckBox.intersectsBox(waddleDee.boundingBox)) {
+                // Use the updated kirbyBoundingBox for the check
+                if (kirbyBoundingBox.intersectsBox(waddleDee.boundingBox)) {
                     console.log("Kirby stomped a Waddle Dee!");
+                    // Remove Waddle Dee
                     scene.remove(waddleDee.mesh);
+                    if (waddleDee.helper) scene.remove(waddleDee.helper); // Remove helper too
                     activeWaddleDees.splice(index, 1);
+
+                    // Spawn a new one (optional, based on game design)
                     spawnWaddleDee(scene, groundMesh);
+
+                    // Give Kirby a bounce
                     kirbyVelocity.y = Config.KIRBY_JUMP_VELOCITY * Config.STOMP_BOUNCE_FACTOR;
-                    isJumping = true;
-                    canDoubleJump = true;
-                    isFlying = false;
+                    isJumping = true; // Kirby is now jumping from the bounce
+                    canDoubleJump = true; // Allow flight after stomp bounce
+                    isFlying = false; // Ensure not in flying state after stomp
+
+                    // Exit the loop for this frame after stomping one enemy
                     return;
                 }
             }
         });
-    } else if (!isInhaling && !suckedWaddleDeeData && !isStomping) {
+    } else if (!isInhaling && !suckedWaddleDeeData && !isStomping) { // --- Regular Collision Check (Only if NOT stomping) ---
         activeWaddleDees.forEach((waddleDee) => {
             if (waddleDee.mesh && !waddleDee.isInhaled && !waddleDee.isBeingSucked) {
                 if (kirbyBoundingBox.intersectsBox(waddleDee.boundingBox)) {
@@ -542,7 +550,8 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
 
     // *** Update the Bounding Box Helper AFTER all Kirby updates ***
     if (kirbyBBHelper) {
-        kirbyBBHelper.update(); // This makes the helper follow kirbyGroup's transforms
+        // The helper should automatically update based on the group now
+        kirbyBBHelper.update();
     }
 }
 
