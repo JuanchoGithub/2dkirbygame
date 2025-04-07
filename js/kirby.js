@@ -201,7 +201,7 @@ function updateKirbyBoundingBox() {
 }
 
 // --- Main Update Function ---
-export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
+export function updateKirby(deltaTime, elapsedTime, keys, groundMesh) {
     if (!kirbyGroup || isDead) return;
 
     // --- Waddle Dee Suck-In Animation ---
@@ -537,20 +537,8 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
         }
     }
 
-    if (camera) {
-        camera.position.x = THREE.MathUtils.lerp(camera.position.x, kirbyGroup.position.x, 0.1);
-        camera.position.y = THREE.MathUtils.lerp(camera.position.y, kirbyGroup.position.y + 10, 0.05);
-        camera.position.z = kirbyGroup.position.z + 20;
-
-        const lookAtTarget = new THREE.Vector3(kirbyGroup.position.x, kirbyGroup.position.y + 1.0, kirbyGroup.position.z);
-        camera.lookAt(lookAtTarget);
-    } else {
-        console.warn("Camera not provided to updateKirby");
-    }
-
     // *** Update the Bounding Box Helper AFTER all Kirby updates ***
     if (kirbyBBHelper) {
-        // The helper should automatically update based on the group now
         kirbyBBHelper.update();
     }
 }

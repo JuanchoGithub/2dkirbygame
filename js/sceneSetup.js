@@ -1,4 +1,5 @@
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; // Import OrbitControls
 
 // Scene
 export const scene = new THREE.Scene();
@@ -14,8 +15,7 @@ if (!canvas) {
 export const camera = new THREE.PerspectiveCamera(
     75, window.innerWidth / window.innerHeight, 0.1, 1000
 );
-camera.position.set(0, 10, 25); // Adjusted for better view
-camera.lookAt(0, 5, 0); // Look slightly higher than origin
+camera.position.set(0, 10, 25); // Initial position, OrbitControls will manage it later
 
 // Renderer
 export const renderer = new THREE.WebGLRenderer({
@@ -26,6 +26,23 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+// --- Orbit Controls ---
+export const controls = new OrbitControls(camera, renderer.domElement);
+controls.enablePan = false; // Disable panning (usually Shift + Mouse)
+controls.enableDamping = true; // Optional: adds inertia to camera movement
+controls.dampingFactor = 0.1;
+controls.screenSpacePanning = false;
+controls.minDistance = 5;  // How close the camera can get
+controls.maxDistance = 50; // How far the camera can zoom out
+controls.maxPolarAngle = Math.PI / 2 - 0.05; // Prevent camera going below ground slightly
+controls.target.set(0, 2, 0); // Initial target point
+controls.mouseButtons = { // Configure mouse buttons
+    LEFT: THREE.MOUSE.ROTATE, // Keep default left button rotate if desired, or set to null
+    MIDDLE: THREE.MOUSE.DOLLY, // Middle mouse wheel for zoom (dolly)
+    RIGHT: THREE.MOUSE.ROTATE   // Right mouse button for rotation
+};
+controls.update(); // Initial update
 
 // Resize Listener
 window.addEventListener('resize', () => {
@@ -61,4 +78,4 @@ directionalLight.target.position.set(0, 0, 0); // Target the center
 // const lightHelper = new THREE.DirectionalLightHelper(directionalLight, 5);
 // scene.add(lightHelper);
 
-console.log("Scene setup module loaded.");
+console.log("Scene setup module loaded with OrbitControls.");

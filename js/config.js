@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 // Game constants
 export const GRAVITY = -30;
 export const GROUND_Y = 0; // Assuming ground is at y=0

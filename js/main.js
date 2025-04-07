@@ -1,13 +1,14 @@
 // Import necessary modules (paths relative to main.js)
 // Note: THREE is loaded globally via script tag in index.html,
 // but modules can still import it if they need explicit access.
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+import * as THREE from 'three';
+import * as Config from './config.js'; // Add this import
 
-import { scene, camera, renderer } from './sceneSetup.js';
+import { scene, camera, renderer, controls } from './sceneSetup.js'; // Import controls
 import { keys, initializeInput } from './input.js';
-import { createGround, createBorderWalls, placeTrees } from './environment.js'; // treeBoundingBoxes imported within modules
-import { initializeKirby, updateKirby } from './kirby.js';
-import { initializeWaddleDees, updateWaddleDees } from './waddledee.js'; // activeWaddleDees imported within modules
+import { createGround, createBorderWalls, placeTrees } from './environment.js';
+import { initializeKirby, updateKirby, getKirbyPosition } from './kirby.js'; // Import getKirbyPosition
+import { initializeWaddleDees, updateWaddleDees } from './waddledee.js';
 import { initializeItems, updateItems } from './items.js';
 
 // --- Initialization ---
@@ -23,6 +24,7 @@ console.log("Initialization complete. Starting game loop...");
 
 // --- Game Loop ---
 const clock = new THREE.Clock();
+const kirbyTargetPosition = new THREE.Vector3(); // Reusable vector for target
 
 function animate() {
     requestAnimationFrame(animate);
@@ -30,10 +32,17 @@ function animate() {
     const elapsedTime = clock.getElapsedTime();
 
     // --- Update Game Logic ---
-    // Pass only necessary arguments
-    updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera);
-    updateWaddleDees(deltaTime, scene, groundMesh); // Doesn't need obstacles passed
+    // Update Kirby first to get his position
+    updateKirby(deltaTime, elapsedTime, keys, groundMesh, null); // Pass null for camera, controls handle it
+    updateWaddleDees(deltaTime, scene, groundMesh);
     updateItems(deltaTime, scene);
+
+    // --- Update Controls ---
+    const kirbyPos = getKirbyPosition();
+    // Smoothly move the control target towards Kirby's position
+    kirbyTargetPosition.set(kirbyPos.x, kirbyPos.y + Config.KIRBY_SIZE * 0.5, kirbyPos.z); // Target slightly above Kirby's base
+    controls.target.lerp(kirbyTargetPosition, 0.1); // Adjust lerp factor (0.1) for camera follow speed
+    controls.update(); // Update controls AFTER updating the target
 
     // --- Rendering ---
     renderer.render(scene, camera);
@@ -41,4 +50,4 @@ function animate() {
 
 // --- Start the Loop ---
 animate();
-console.log("Modular Three.js Kirby game running with restored features.");
+console.log("Modular Three.js Kirby game running with OrbitControls.");
