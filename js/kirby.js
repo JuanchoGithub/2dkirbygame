@@ -5,6 +5,7 @@ import { wallBoundingBoxes, treeBoundingBoxes } from './environment.js'; // Impo
 import { scene } from './sceneSetup.js';
 import { activeWaddleDees, startWaddleDeeSuck, spawnWaddleDee } from './waddledee.js'; // Import Waddle Dee functions
 import * as items from './items.js'; // Import the entire items module
+import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js'; // Import GLTFLoader
 
 // Kirby state variables
 export let kirbyGroup;
@@ -23,6 +24,16 @@ let swordMesh = null;
 let isDead = false; // Game Over state flag
 let isFlying = false; // NEW: Track flight state specifically
 let kirbyBBHelper = null; // Variable para el helper
+let leftFoot, rightFoot, leftEye, rightEye, leftCheek, rightCheek, mouth; // Store references to body parts
+let kirbyRabbitModel = null; // To store the loaded rabbit model
+let activeRabbitMesh = null; // To store the active instance of the rabbit model
+let rabbitRotationOffset = -90 * (Math.PI / 180); // 90 degrees in radians
+let kirbyRabbitVoxelModel = null; // To store the voxel model
+let isVoxelMode = false;
+let voxelTransformTimer = 0;
+const VOXEL_TRANSFORM_INTERVAL = 3.0; // Transform every 3 seconds
+const VOXEL_TRANSFORM_MIN_DURATION = 1.0; // Minimum time to stay transformed
+const VOXEL_TRANSFORM_MAX_DURATION = 5.0; // Maximum time to stay transformed
 
 // Animation variables
 const walkCycleSpeed = 15;
@@ -73,12 +84,12 @@ export function initializeKirby(scene) {
     const feetGeometry = new THREE.SphereGeometry(feetSize / 2, 16, 8);
     const feetMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
 
-    const leftFoot = new THREE.Mesh(feetGeometry, feetMaterial);
+    leftFoot = new THREE.Mesh(feetGeometry, feetMaterial); // Store reference
     leftFoot.position.set(-Config.KIRBY_SIZE * 0.25, -Config.KIRBY_SIZE * 0.4, Config.KIRBY_SIZE * 0.1);
     leftFoot.castShadow = true;
     kirbyGroup.add(leftFoot);
 
-    const rightFoot = new THREE.Mesh(feetGeometry, feetMaterial);
+    rightFoot = new THREE.Mesh(feetGeometry, feetMaterial); // Store reference
     rightFoot.position.set(Config.KIRBY_SIZE * 0.25, -Config.KIRBY_SIZE * 0.4, Config.KIRBY_SIZE * 0.1);
     rightFoot.castShadow = true;
     kirbyGroup.add(rightFoot);
@@ -105,12 +116,12 @@ export function initializeKirby(scene) {
     const eyeGeometry = new THREE.SphereGeometry(eyeSize / 2, 16, 8);
     const eyeMaterial = new THREE.MeshStandardMaterial({ color: 0x000000 });
 
-    const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+    leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial); // Store reference
     leftEye.position.set(-Config.KIRBY_SIZE * 0.15, Config.KIRBY_SIZE * 0.1, Config.KIRBY_SIZE * 0.45);
     leftEye.scale.set(0.8, 1.2, 0.8);
     kirbyGroup.add(leftEye);
 
-    const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+    rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial); // Store reference
     rightEye.position.set(Config.KIRBY_SIZE * 0.15, Config.KIRBY_SIZE * 0.1, Config.KIRBY_SIZE * 0.45);
     rightEye.scale.set(0.8, 1.2, 0.8);
     kirbyGroup.add(rightEye);
@@ -120,12 +131,12 @@ export function initializeKirby(scene) {
     const cheekGeometry = new THREE.SphereGeometry(cheekSize / 2, 16, 8);
     const cheekMaterial = new THREE.MeshStandardMaterial({ color: 0xff80ab });
 
-    const leftCheek = new THREE.Mesh(cheekGeometry, cheekMaterial);
+    leftCheek = new THREE.Mesh(cheekGeometry, cheekMaterial); // Store reference
     leftCheek.position.set(-Config.KIRBY_SIZE * 0.3, -Config.KIRBY_SIZE * 0.05, Config.KIRBY_SIZE * 0.4);
     leftCheek.scale.set(1.5, 1, 1);
     kirbyGroup.add(leftCheek);
 
-    const rightCheek = new THREE.Mesh(cheekGeometry, cheekMaterial);
+    rightCheek = new THREE.Mesh(cheekGeometry, cheekMaterial); // Store reference
     rightCheek.position.set(Config.KIRBY_SIZE * 0.3, -Config.KIRBY_SIZE * 0.05, Config.KIRBY_SIZE * 0.4);
     rightCheek.scale.set(1.5, 1, 1);
     kirbyGroup.add(rightCheek);
@@ -135,7 +146,7 @@ export function initializeKirby(scene) {
     const mouthGeometry = new THREE.SphereGeometry(mouthSize / 2, 8, 8);
     const mouthMaterial = new THREE.MeshStandardMaterial({ color: 0x400000 });
 
-    const mouth = new THREE.Mesh(mouthGeometry, mouthMaterial);
+    mouth = new THREE.Mesh(mouthGeometry, mouthMaterial); // Store reference
     mouth.position.set(0, -Config.KIRBY_SIZE * 0.15, Config.KIRBY_SIZE * 0.48);
     mouth.scale.set(2, 1, 1);
     kirbyGroup.add(mouth);
@@ -148,8 +159,79 @@ export function initializeKirby(scene) {
 
     // *** Create and add Bounding Box Helper TRACKING kirbyGroup ***
     kirbyBBHelper = new THREE.BoxHelper(kirbyGroup, 0xffff00); // Yellow helper, tracks kirbyGroup
-    kirbyBBHelper.visible = true; // Make it visible for debugging
+    kirbyBBHelper.visible = false; // Changed from true to false to hide the helper
     scene.add(kirbyBBHelper); // Add helper to the main scene
+
+    // --- Load Kirby Rabbit Models ---
+    const loader = new GLTFLoader();
+    
+    // Load normal rabbit model
+    loader.load(
+        './models/kirby_rabbit.glb',
+        (gltf) => {
+            kirbyRabbitModel = gltf.scene;
+            kirbyRabbitModel.scale.set(
+                Config.KIRBY_SIZE * 0.64,
+                Config.KIRBY_SIZE * 0.64,
+                Config.KIRBY_SIZE * 0.64
+            );
+            kirbyRabbitModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    // Brighten the material
+                    if (child.material) {
+                        child.material = child.material.clone(); // Clone to avoid affecting other instances
+                        if (child.material.color) {
+                            // Increase RGB values to make it brighter
+                            child.material.color.multiplyScalar(1.3); // Increase brightness by 30%
+                        }
+                        child.material.emissive.set(0x333333); // Add some emission
+                        child.material.emissiveIntensity = 0.3; // Control emission strength
+                    }
+                }
+            });
+            console.log("Kirby Rabbit model loaded successfully.");
+        },
+        undefined,
+        (error) => {
+            console.error('Error loading Kirby Rabbit model:', error);
+        }
+    );
+
+    // Load voxel rabbit model
+    loader.load(
+        './models/kirby_rabbit_voxel.glb',
+        (gltf) => {
+            kirbyRabbitVoxelModel = gltf.scene;
+            kirbyRabbitVoxelModel.scale.set(
+                Config.KIRBY_SIZE * 0.64,
+                Config.KIRBY_SIZE * 0.64,
+                Config.KIRBY_SIZE * 0.64
+            );
+            kirbyRabbitVoxelModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    // Brighten the material
+                    if (child.material) {
+                        child.material = child.material.clone(); // Clone to avoid affecting other instances
+                        if (child.material.color) {
+                            // Increase RGB values to make it brighter
+                            child.material.color.multiplyScalar(1.3); // Increase brightness by 30%
+                        }
+                        child.material.emissive.set(0x333333); // Add some emission
+                        child.material.emissiveIntensity = 0.3; // Control emission strength
+                    }
+                }
+            });
+            console.log("Kirby Rabbit Voxel model loaded successfully.");
+        },
+        undefined,
+        (error) => {
+            console.error('Error loading Kirby Rabbit Voxel model:', error);
+        }
+    );
 
     console.log("Kirby initialized with details, particles, and BB helper.");
 }
@@ -206,10 +288,24 @@ function updateKirbyBoundingBox() {
     }
 }
 
+// --- Helper to toggle visibility of default Kirby parts ---
+function setKirbyVisibility(visible) {
+    if (kirbyMesh) kirbyMesh.visible = visible;
+    if (leftHand) leftHand.visible = visible;
+    if (rightHand) rightHand.visible = visible;
+    if (leftFoot) leftFoot.visible = visible;
+    if (rightFoot) rightFoot.visible = visible;
+    if (leftEye) leftEye.visible = visible;
+    if (rightEye) rightEye.visible = visible;
+    if (leftCheek) leftCheek.visible = visible;
+    if (rightCheek) rightCheek.visible = visible;
+    if (mouth) mouth.visible = visible;
+    // Don't hide the suckParticles here, handle their visibility separately
+}
+
 // --- Main Update Function ---
 // *** ADD camera PARAMETER ***
 export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
-    // *** ADD LOGGING AT THE START ***
     console.log(`updateKirby called. DeltaTime: ${deltaTime.toFixed(4)}, Camera valid: ${!!camera}`);
     if (!kirbyGroup || isDead || !camera) {
         console.log("updateKirby exiting early."); // Log if exiting early
@@ -253,15 +349,12 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
     let currentMoveSpeed = Config.KIRBY_SPEED;
 
     if (!isInhaling && !suckedWaddleDeeData) {
-        // Get camera direction projected onto the ground plane
         camera.getWorldDirection(cameraForward);
         cameraForward.y = 0; // Ignore vertical component
         cameraForward.normalize();
 
-        // Calculate the right vector based on the camera forward vector
         cameraRight.crossVectors(cameraForward, camera.up).normalize(); // Use camera.up for correct right vector
         
-        // Calculate movement based on camera orientation
         if (keys.ArrowUp) moveDirection.add(cameraForward);
         if (keys.ArrowDown) moveDirection.sub(cameraForward);
         if (keys.ArrowLeft) moveDirection.sub(cameraRight);
@@ -269,7 +362,6 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
 
         isMovingHorizontally = moveDirection.lengthSq() > 0;
 
-        // *** Apply flight drag if flying ***
         if (isFlying) {
             currentMoveSpeed *= (1.0 - Config.KIRBY_FLIGHT_HORIZONTAL_DRAG * deltaTime);
         }
@@ -279,21 +371,17 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
             targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
             kirbyVelocity.x = moveDirection.x * currentMoveSpeed;
             kirbyVelocity.z = moveDirection.z * currentMoveSpeed;
-            // *** ADD LOGGING FOR VELOCITY ***
             console.log(`Moving: Velocity set to X: ${kirbyVelocity.x.toFixed(2)}, Z: ${kirbyVelocity.z.toFixed(2)}`);
         } else {
-            // Apply slight damping
             kirbyVelocity.x *= (1.0 - deltaTime * 5.0);
             kirbyVelocity.z *= (1.0 - deltaTime * 5.0);
             if (Math.abs(kirbyVelocity.x) < 0.1 && Math.abs(kirbyVelocity.z) < 0.1 && (kirbyVelocity.x !== 0 || kirbyVelocity.z !== 0)) {
-                 // *** ADD LOGGING FOR DAMPING STOP ***
                  console.log("Damping stopped horizontal velocity.");
                  kirbyVelocity.x = 0;
                  kirbyVelocity.z = 0;
             }
         }
     } else {
-        // *** ADD LOGGING IF MOVEMENT IS BLOCKED BY STATE ***
         if (isInhaling) console.log("Movement blocked: Inhaling");
         if (suckedWaddleDeeData) console.log("Movement blocked: Sucking WD");
         kirbyVelocity.x = 0;
@@ -301,7 +389,6 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
         isMovingHorizontally = false;
     }
 
-    // Smooth Rotation
     let currentAngleY = kirbyGroup.rotation.y;
     let angleDifference = targetRotation - currentAngleY;
     while (angleDifference < -Math.PI) angleDifference += Math.PI * 2;
@@ -310,7 +397,6 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
          kirbyGroup.rotation.y += angleDifference * 0.15;
     }
 
-    // --- Jumping & Flight (Replaces old Jump/Float) ---
     const isGrounded = kirbyGroup.position.y <= Config.GROUND_Y + Config.KIRBY_SIZE / 2 + 0.01;
 
     if (keys.Space && !isInhaling && !suckedWaddleDeeData) {
@@ -327,7 +413,6 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
         keys.Space = false;
     }
 
-    // --- Apply Gravity ---
     if (isFlying) {
         kirbyVelocity.y += Config.GRAVITY * Config.KIRBY_FLOAT_GRAVITY_SCALE * deltaTime;
         kirbyVelocity.y = Math.max(kirbyVelocity.y, -Config.KIRBY_FLOAT_SPEED);
@@ -346,7 +431,6 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
         }
     }
 
-    // --- Inhaling ---
     if (keys.KeyX && !isInhaling && !currentPower && !suckedWaddleDeeData && isGrounded) {
         isInhaling = true;
         inhaleTimer = Config.KIRBY_INHALE_DURATION;
@@ -426,7 +510,6 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
         }
     }
 
-    // --- Using Power ---
     if (keys.KeyX && currentPower === 'sword' && !isInhaling && !suckedWaddleDeeData) {
         console.log("Kirby uses Sword Attack!");
         if (swordMesh) {
@@ -435,13 +518,10 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
         keys.KeyX = false;
     }
 
-    // --- Update Position ---
     const deltaPosition = kirbyVelocity.clone().multiplyScalar(deltaTime);
     const targetPosition = kirbyGroup.position.clone().add(deltaPosition);
-    // *** ADD LOGGING FOR POSITION CHANGE ATTEMPT ***
     console.log(`Attempting position change: dX: ${deltaPosition.x.toFixed(3)}, dY: ${deltaPosition.y.toFixed(3)}, dZ: ${deltaPosition.z.toFixed(3)}`);
 
-    // --- Collision Detection & Resolution ---
     updateKirbyBoundingBox();
 
     if (targetPosition.y < Config.GROUND_Y + Config.KIRBY_SIZE / 2) {
@@ -472,22 +552,73 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
         }
     });
 
-    // *** ADD LOGGING FOR COLLISION RESULTS ***
     console.log(`Collision check results: collisionX=${collisionX}, collisionZ=${collisionZ}`);
 
-    // Apply position changes based on collision flags
     const originalPosition = kirbyGroup.position.clone(); // Store position before applying changes
     if (!collisionX) kirbyGroup.position.x = targetPosition.x; else kirbyVelocity.x = 0;
     if (!collisionZ) kirbyGroup.position.z = targetPosition.z; else kirbyVelocity.z = 0;
     kirbyGroup.position.y = targetPosition.y;
 
-    // *** ADD LOGGING FOR FINAL POSITION ***
     console.log(`Position updated: Old(${originalPosition.x.toFixed(2)}, ${originalPosition.z.toFixed(2)}) -> New(${kirbyGroup.position.x.toFixed(2)}, ${kirbyGroup.position.z.toFixed(2)})`);
 
-    // *** Update Bounding Box AFTER final position update for interactions ***
     updateKirbyBoundingBox();
 
-    // --- Stomp Check ---
+    // --- Handle Rabbit Voxel Transformation ---
+    if (activeRabbitMesh && kirbyRabbitVoxelModel) {
+        voxelTransformTimer += deltaTime;
+        
+        if (voxelTransformTimer >= VOXEL_TRANSFORM_INTERVAL) {
+            if (!isVoxelMode) {
+                // Store current position and rotation
+                const currentPos = activeRabbitMesh.position.clone();
+                const currentRot = activeRabbitMesh.rotation.clone();
+                const currentScale = activeRabbitMesh.scale.clone();
+                
+                // Remove normal rabbit
+                scene.remove(activeRabbitMesh);
+                
+                // Add voxel rabbit
+                activeRabbitMesh = kirbyRabbitVoxelModel.clone();
+                activeRabbitMesh.position.copy(currentPos);
+                activeRabbitMesh.rotation.copy(currentRot);
+                activeRabbitMesh.scale.copy(currentScale);
+                scene.add(activeRabbitMesh);
+                
+                isVoxelMode = true;
+                // Set random duration for voxel mode
+                const randomDuration = VOXEL_TRANSFORM_MIN_DURATION + 
+                    Math.random() * (VOXEL_TRANSFORM_MAX_DURATION - VOXEL_TRANSFORM_MIN_DURATION);
+                voxelTransformTimer = VOXEL_TRANSFORM_INTERVAL - randomDuration;
+            } else {
+                // Store current position and rotation
+                const currentPos = activeRabbitMesh.position.clone();
+                const currentRot = activeRabbitMesh.rotation.clone();
+                const currentScale = activeRabbitMesh.scale.clone();
+                
+                // Remove voxel rabbit
+                scene.remove(activeRabbitMesh);
+                
+                // Add normal rabbit back
+                activeRabbitMesh = kirbyRabbitModel.clone();
+                activeRabbitMesh.position.copy(currentPos);
+                activeRabbitMesh.rotation.copy(currentRot);
+                activeRabbitMesh.scale.copy(currentScale);
+                scene.add(activeRabbitMesh);
+                
+                isVoxelMode = false;
+                voxelTransformTimer = 0;
+            }
+        }
+    }
+
+    // --- Update Active Rabbit Mesh Position/Rotation ---
+    if (activeRabbitMesh) {
+        activeRabbitMesh.position.copy(kirbyGroup.position);
+        activeRabbitMesh.rotation.copy(kirbyGroup.rotation);
+        activeRabbitMesh.rotation.y += rabbitRotationOffset;
+        activeRabbitMesh.position.y += Config.KIRBY_SIZE * 0.4;
+    }
+
     const isStomping = kirbyVelocity.y < -Config.KIRBY_JUMP_VELOCITY * 0.5 && !isFlying;
 
     if (isStomping) {
@@ -513,7 +644,6 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
                 if (kirbyBoundingBox.intersectsBox(waddleDee.boundingBox)) {
                     console.error("GAME OVER: Kirby touched a Waddle Dee!");
                     isDead = true;
-                    alert("Game Over! Kirby touched a Waddle Dee.");
                     window.location.reload();
                     return;
                 }
@@ -521,26 +651,36 @@ export function updateKirby(deltaTime, elapsedTime, keys, groundMesh, camera) {
         });
     }
 
-    let targetScale = kirbyInitialScale;
-    if (isInhaling) {
-        targetScale = Config.KIRBY_INHALE_SCALE;
-    } else if (isFlying) {
-        targetScale = Config.KIRBY_PUFF_SCALE;
-    }
-    if (!kirbyGroup.scale.equals(targetScale)) {
-        kirbyGroup.scale.lerp(targetScale, 0.15);
-        if (kirbyGroup.scale.distanceToSquared(targetScale) < 0.0001) {
-            kirbyGroup.scale.copy(targetScale);
+    const meshToAnimate = activeRabbitMesh ? activeRabbitMesh : kirbyGroup;
+
+    let targetScale = activeRabbitMesh ? activeRabbitMesh.scale.clone() : kirbyInitialScale.clone();
+    if (!activeRabbitMesh) {
+        if (isInhaling) {
+            targetScale = Config.KIRBY_INHALE_SCALE;
+        } else if (isFlying) {
+            targetScale = Config.KIRBY_PUFF_SCALE;
         }
     }
 
-    let targetRotationZ = 0;
-    if (isMovingHorizontally && isGrounded && !isInhaling && !suckedWaddleDeeData) {
-        targetRotationZ = Math.sin(elapsedTime * walkCycleSpeed) * walkCycleAmplitude;
+    if (!meshToAnimate.scale.equals(targetScale)) {
+        meshToAnimate.scale.lerp(targetScale, 0.15);
+        if (meshToAnimate.scale.distanceToSquared(targetScale) < 0.0001) {
+            meshToAnimate.scale.copy(targetScale);
+        }
     }
-    kirbyGroup.rotation.z = THREE.MathUtils.lerp(kirbyGroup.rotation.z, targetRotationZ, 0.1);
 
-    if (leftHand && rightHand) {
+    if (!activeRabbitMesh) {
+        let targetRotationZ = 0;
+        if (isMovingHorizontally && isGrounded && !isInhaling && !suckedWaddleDeeData) {
+            targetRotationZ = Math.sin(elapsedTime * walkCycleSpeed) * walkCycleAmplitude;
+        }
+        kirbyGroup.rotation.z = THREE.MathUtils.lerp(kirbyGroup.rotation.z, targetRotationZ, 0.1);
+    } else {
+        kirbyGroup.rotation.z = THREE.MathUtils.lerp(kirbyGroup.rotation.z, 0, 0.1);
+        activeRabbitMesh.rotation.z = 0;
+    }
+
+    if (!activeRabbitMesh && leftHand && rightHand) {
         if (isFlying && kirbyVelocity.y >= -Config.KIRBY_FLOAT_SPEED * 0.5) {
             const flapAngle = Math.sin(elapsedTime * armFlapSpeed) * armFlapAmplitude;
             const flapQuaternionLeft = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), flapAngle);
@@ -574,7 +714,7 @@ export function givePower(powerName, itemMesh) {
         console.log("Kirby already has a power, cannot pick up", powerName);
         return false;
     }
-    if (!itemMesh) {
+    if (!itemMesh && powerName !== 'helmet') {
         console.error("givePower called with invalid itemMesh for", powerName);
         return false;
     }
@@ -601,13 +741,37 @@ export function givePower(powerName, itemMesh) {
         swordMesh.castShadow = true;
 
     } else if (powerName === 'helmet') {
-        helmetMesh = itemMesh;
-        kirbyGroup.add(helmetMesh);
-        const kirbyHeadY = Config.KIRBY_SIZE * 0.4;
-        helmetMesh.position.set(0, kirbyHeadY, 0.1);
-        helmetMesh.rotation.set(0, 0, 0);
-        helmetMesh.scale.set(0.9, 0.9, 0.9);
-        helmetMesh.castShadow = true;
+        if (kirbyRabbitModel) {
+            setKirbyVisibility(false);
+
+            if (itemMesh && itemMesh.parent) {
+                 itemMesh.parent.remove(itemMesh);
+            }
+
+            activeRabbitMesh = kirbyRabbitModel.clone();
+            activeRabbitMesh.position.copy(kirbyGroup.position);
+            activeRabbitMesh.rotation.copy(kirbyGroup.rotation);
+            activeRabbitMesh.rotation.y += rabbitRotationOffset;
+            // Make active mesh 20% smaller (1.6 * 0.8 = 1.28)
+            activeRabbitMesh.scale.set(
+                Config.KIRBY_SIZE * 1.28,
+                Config.KIRBY_SIZE * 1.28,
+                Config.KIRBY_SIZE * 1.28
+            );
+            activeRabbitMesh.position.y += Config.KIRBY_SIZE * 0.4;
+            scene.add(activeRabbitMesh);
+            console.log("Swapped to Kirby Rabbit model.");
+        } else {
+            console.warn("Kirby Rabbit model not loaded yet, cannot swap.");
+            helmetMesh = itemMesh;
+            kirbyGroup.add(helmetMesh);
+            const kirbyHeadY = Config.KIRBY_SIZE * 0.4;
+            helmetMesh.position.set(0, kirbyHeadY, 0.1);
+            helmetMesh.rotation.set(0, 0, 0);
+            helmetMesh.scale.set(0.9, 0.9, 0.9);
+            helmetMesh.castShadow = true;
+            currentPower = 'helmet_fallback';
+        }
     }
 
     return true;
@@ -618,56 +782,68 @@ export function removePower(shouldThrow = false) {
     if (!currentPower) return;
 
     console.log(`Kirby lost ${currentPower} power.`);
-    let itemToRespawn = null; // Keep track of the mesh to potentially respawn
+    let itemToRespawn = null;
+    let itemTypeToRespawn = currentPower;
 
     if (currentPower === 'sword') {
         if (helmetMesh) kirbyGroup.remove(helmetMesh);
         if (swordMesh) {
-            itemToRespawn = swordMesh; // Store the sword mesh
+            itemToRespawn = swordMesh;
             kirbyGroup.remove(swordMesh);
         }
         helmetMesh = null;
         swordMesh = null;
     } else if (currentPower === 'helmet') {
-        if (helmetMesh) {
-            itemToRespawn = helmetMesh; // Store the helmet mesh
-            kirbyGroup.remove(helmetMesh);
+        if (activeRabbitMesh) {
+            scene.remove(activeRabbitMesh);
+            activeRabbitMesh = null;
+            setKirbyVisibility(true);
+            isVoxelMode = false;
+            voxelTransformTimer = 0;
+            console.log("Swapped back to default Kirby model.");
         }
         helmetMesh = null;
+    } else if (currentPower === 'helmet_fallback') {
+         if (helmetMesh) {
+             itemToRespawn = helmetMesh;
+             kirbyGroup.remove(helmetMesh);
+         }
+         helmetMesh = null;
+         itemTypeToRespawn = 'helmet';
     }
 
-    // *** Item Throwing Logic ***
     if (shouldThrow && itemToRespawn) {
-        // Get Kirby's forward direction
         const throwDirection = new THREE.Vector3();
         kirbyGroup.getWorldDirection(throwDirection);
-        throwDirection.y = 0.3; // Give it some upward lift
+        throwDirection.y = 0.3;
         throwDirection.normalize();
 
-        // Calculate throw position slightly in front of Kirby
         const throwPosition = kirbyGroup.position.clone()
-            .add(throwDirection.clone().multiplyScalar(Config.KIRBY_SIZE * 1.5)); // Throw 1.5 Kirby sizes away
-        throwPosition.y = Config.GROUND_Y + 0.2; // Place slightly above ground
+            .add(throwDirection.clone().multiplyScalar(Config.KIRBY_SIZE * 1.5));
+        throwPosition.y = Config.GROUND_Y + 0.2;
 
         itemToRespawn.position.copy(throwPosition);
-        // Reset rotation/scale if needed (depends on how items.js handles spawning)
-        itemToRespawn.rotation.set(0, Math.random() * Math.PI * 2, Math.PI / 1.5); // Example reset
-        itemToRespawn.scale.set(1, 1, 1); // Reset scale
+        if (itemTypeToRespawn === 'sword') {
+             itemToRespawn.rotation.set(0, Math.random() * Math.PI * 2, Math.PI / 1.5);
+             itemToRespawn.scale.set(1, 1, 1);
+        } else if (itemTypeToRespawn === 'helmet') {
+             itemToRespawn.rotation.set(0, Math.random() * Math.PI * 2, 0);
+             itemToRespawn.scale.set(1, 1, 1);
+        }
 
-        // Apply initial velocity to the item
-        const throwVelocity = throwDirection.multiplyScalar(10); // Adjust throw strength
-        itemToRespawn.userData.velocity = throwVelocity; // Store velocity in userData for per-frame updates
-        itemToRespawn.userData.isThrowable = true; // Flag to indicate it's being thrown
+        const throwVelocity = throwDirection.multiplyScalar(10);
+        itemToRespawn.userData.velocity = throwVelocity;
+        itemToRespawn.userData.isThrowable = true;
 
-        scene.add(itemToRespawn); // Add back to the main scene
+        scene.add(itemToRespawn);
 
-        // Add to items array so it can be picked up again
-        items.activeItems.push(itemToRespawn); // Add back to the active items array using items.activeItems
-        console.log(`Respawned ${currentPower} item visually near Kirby.`);
+        const itemData = { mesh: itemToRespawn, type: itemTypeToRespawn, boundingBox: new THREE.Box3().setFromObject(itemToRespawn) };
+        items.activeItems.push(itemData);
+        console.log(`Respawned ${itemTypeToRespawn} item visually near Kirby.`);
     }
 
     currentPower = null;
-    inhaledObject = null; // Clear inhaled object too when power is lost
+    inhaledObject = null;
 }
 
 export function getKirbyBoundingBox() {

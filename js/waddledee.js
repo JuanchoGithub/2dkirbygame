@@ -3,53 +3,60 @@ import * as Config from './config.js';
 import { checkCollision, getRandomPositionOnGround } from './utils.js';
 import { wallBoundingBoxes, treeBoundingBoxes } from './environment.js';
 import { scene } from './sceneSetup.js'; // Import scene from sceneSetup.js
+import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 
 export let activeWaddleDees = [];
 let lastSpawnTime = 0;
 const vector3Temp = new THREE.Vector3(); // Reusable vector
+let waddleDeeModel = null; // Store the loaded model
+const waddleDeeRotation = -90 * (Math.PI / 180); // Store in radians
 
 // Store waddle dee state like target position, speed etc.
 const waddleDeeState = new Map();
 
+// Add this function to load the model
+function loadWaddleDeeModel() {
+    return new Promise((resolve, reject) => {
+        const loader = new GLTFLoader();
+        loader.load(
+            './models/waddle_dee.glb',
+            (gltf) => {
+                waddleDeeModel = gltf.scene;
+                // Adjust the model's scale
+                waddleDeeModel.scale.set(Config.WADDLEDEE_SIZE, Config.WADDLEDEE_SIZE, Config.WADDLEDEE_SIZE);
+                // Rotate the model to face forward (-90 degrees around Y axis)
+                waddleDeeModel.rotation.y = waddleDeeRotation;
+                resolve();
+            },
+            undefined,
+            (error) => {
+                console.error('Error loading Waddle Dee model:', error);
+                reject(error);
+            }
+        );
+    });
+}
+
 function createWaddleDeeMesh() {
-    const group = new THREE.Group();
-
-    // Body
-    const bodyGeo = new THREE.SphereGeometry(Config.WADDLEDEE_SIZE / 2, 16, 8);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: Config.WADDLEDEE_BODY_COLOR });
-    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    bodyMesh.castShadow = true;
-    bodyMesh.receiveShadow = true;
-    group.add(bodyMesh);
-
-    // Feet (simple cylinders)
-    const feetGeo = new THREE.CylinderGeometry(Config.WADDLEDEE_SIZE / 6, Config.WADDLEDEE_SIZE / 6, Config.WADDLEDEE_SIZE / 4, 6);
-    const feetMat = new THREE.MeshStandardMaterial({ color: Config.WADDLEDEE_FEET_COLOR });
-
-    const leftFoot = new THREE.Mesh(feetGeo, feetMat);
-    leftFoot.position.set(-Config.WADDLEDEE_SIZE / 4, -Config.WADDLEDEE_SIZE / 2.5, 0);
-    leftFoot.castShadow = true;
-    group.add(leftFoot);
-
-    const rightFoot = new THREE.Mesh(feetGeo, feetMat);
-    rightFoot.position.set(Config.WADDLEDEE_SIZE / 4, -Config.WADDLEDEE_SIZE / 2.5, 0);
-    rightFoot.castShadow = true;
-    group.add(rightFoot);
-
-    // Eyes (simple small black spheres)
-    const eyeGeo = new THREE.SphereGeometry(Config.WADDLEDEE_SIZE / 10, 8, 8);
-    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x000000 }); // Black
-
-    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-    // Position eyes forward and slightly spaced out
-    leftEye.position.set(-Config.WADDLEDEE_SIZE / 5, Config.WADDLEDEE_SIZE / 8, Config.WADDLEDEE_SIZE / 2.5);
-    group.add(leftEye);
-
-    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-    rightEye.position.set(Config.WADDLEDEE_SIZE / 5, Config.WADDLEDEE_SIZE / 8, Config.WADDLEDEE_SIZE / 2.5);
-    group.add(rightEye);
-
-    return group;
+    if (!waddleDeeModel) {
+        console.error('Waddle Dee model not loaded!');
+        return new THREE.Group(); // Return empty group as fallback
+    }
+    
+    const model = waddleDeeModel.clone();
+    
+    // Apply the base rotation to the cloned model
+    model.rotation.y = waddleDeeRotation; // Already stored in radians
+    
+    // Ensure the model casts and receives shadows
+    model.traverse((child) => {
+        if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+        }
+    });
+    
+    return model;
 }
 
 export function spawnWaddleDee(groundMesh) {
@@ -78,7 +85,7 @@ export function spawnWaddleDee(groundMesh) {
         helper: null // Add property for helper
     };
     waddleDee.boundingBox.setFromObject(waddleDee.mesh); // Initial bounding box
-    mesh.rotation.y = Math.atan2(initialVelocity.x, initialVelocity.z); // Face initial direction
+    mesh.rotation.y = waddleDeeRotation + Math.atan2(initialVelocity.x, initialVelocity.z); // Face initial direction
 
     // Create helper but don't add it or make it invisible
     waddleDee.helper = new THREE.BoxHelper(waddleDee.mesh, 0x0000ff); // Blue helpers for Waddle Dees
@@ -97,12 +104,21 @@ export function spawnWaddleDee(groundMesh) {
     return waddleDee;
 }
 
-export function initializeWaddleDees(scene, groundMesh) {
+export async function initializeWaddleDees(scene, groundMesh) {
+    if (!waddleDeeModel) {
+        try {
+            await loadWaddleDeeModel();
+        } catch (error) {
+            console.error('Failed to initialize Waddle Dees:', error);
+            return;
+        }
+    }
+    
     activeWaddleDees = []; // Clear existing
     for (let i = 0; i < Config.MAX_WADDLEDEES; i++) {
         spawnWaddleDee(groundMesh);
     }
-    lastSpawnTime = Date.now(); // Set initial time
+    lastSpawnTime = Date.now();
     console.log("Waddle Dees initialized.");
 }
 
@@ -132,9 +148,9 @@ export function updateWaddleDee(waddleDee, delta, playerPosition) {
         const moveDistance = state.speed * delta;
         waddleDee.mesh.position.addScaledVector(direction, moveDistance);
 
-        // Optional: Make Waddle Dee face the direction it's moving
+        // Convert waddleDeeRotation to radians and add to the movement angle
         const angle = Math.atan2(direction.x, direction.z);
-        waddleDee.mesh.rotation.y = angle;
+        waddleDee.mesh.rotation.y = waddleDeeRotation + angle;
 
     } else {
         // If direction is too small, don't move this frame
